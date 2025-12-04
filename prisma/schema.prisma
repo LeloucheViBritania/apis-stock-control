@@ -1,0 +1,495 @@
+// ============================================
+// PRISMA SCHEMA - GESTION DE STOCK
+// Support FREE et PREMIUM tiers
+// ============================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// SYSTÈME D'ABONNEMENT
+// ============================================
+
+model Utilisateur {
+  id                Int       @id @default(autoincrement())
+  nomUtilisateur    String    @unique @map("nom_utilisateur") @db.VarChar(50)
+  email             String    @unique @db.VarChar(100)
+  motDePasseHash    String    @map("mot_de_passe_hash") @db.VarChar(255)
+  nomComplet        String?   @map("nom_complet") @db.VarChar(100)
+  role              Role      @default(EMPLOYE)
+  estActif          Boolean   @default(true) @map("est_actif")
+  
+  // Abonnement
+  tierAbonnement    TierAbonnement @default(GRATUIT) @map("tier_abonnement")
+  dateExpiration    DateTime?      @map("date_expiration")
+  
+  dateCreation      DateTime  @default(now()) @map("date_creation")
+  dateModification  DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  entrepotsGeres    Entrepot[] @relation("ResponsableEntrepot")
+  commandesCreees   Commande[] @relation("CommandeCreePar")
+  mouvementsEffectues MouvementStock[] @relation("MouvementEffectuePar")
+  transfertsCrees   TransfertStock[] @relation("TransfertCreePar")
+  ajustementsCrees  AjustementStock[] @relation("AjustementCreePar")
+  ajustementsApprouves AjustementStock[] @relation("AjustementApprouvePar")
+  bonsCommandeCrees BonCommandeAchat[] @relation("BonCommandeCreePar")
+  journalAudit      JournalAudit[]
+  
+  @@map("utilisateurs")
+}
+
+enum Role {
+  ADMIN         @map("admin")
+  GESTIONNAIRE  @map("gestionnaire")
+  EMPLOYE       @map("employe")
+}
+
+enum TierAbonnement {
+  GRATUIT   @map("gratuit")
+  PREMIUM   @map("premium")
+}
+
+// ============================================
+// TABLES GRATUITES (FREE TIER)
+// ============================================
+
+model Categorie {
+  id                  Int       @id @default(autoincrement())
+  nom                 String    @db.VarChar(100)
+  description         String?   @db.Text
+  categorieParenteId  Int?      @map("categorie_parente_id")
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  categorieParente    Categorie?  @relation("CategorieHierarchie", fields: [categorieParenteId], references: [id], onDelete: SetNull)
+  sousCategories      Categorie[] @relation("CategorieHierarchie")
+  produits            Produit[]
+  
+  @@map("categories")
+}
+
+model Fournisseur {
+  id                  Int       @id @default(autoincrement())
+  nom                 String    @db.VarChar(100)
+  personneContact     String?   @map("personne_contact") @db.VarChar(100)
+  email               String?   @db.VarChar(100)
+  telephone           String?   @db.VarChar(20)
+  adresse             String?   @db.Text
+  ville               String?   @db.VarChar(50)
+  pays                String?   @db.VarChar(50)
+  numeroFiscal        String?   @map("numero_fiscal") @db.VarChar(50)
+  conditionsPaiement  String?   @map("conditions_paiement") @db.VarChar(100)
+  estActif            Boolean   @default(true) @map("est_actif")
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  dateModification    DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  produitsFournisseurs ProduitFournisseur[]
+  bonsCommande        BonCommandeAchat[]
+  
+  @@map("fournisseurs")
+}
+
+model Produit {
+  id                  Int       @id @default(autoincrement())
+  reference           String    @unique @db.VarChar(50)
+  nom                 String    @db.VarChar(200)
+  description         String?   @db.Text
+  categorieId         Int?      @map("categorie_id")
+  marque              String?   @db.VarChar(100)
+  uniteMesure         String    @default("unite") @map("unite_mesure") @db.VarChar(20)
+  poids               Decimal?  @db.Decimal(10, 2)
+  dimensions          String?   @db.VarChar(50)
+  codeBarre           String?   @map("code_barre") @db.VarChar(100)
+  niveauStockMin      Int       @default(0) @map("niveau_stock_min")
+  niveauStockMax      Int?      @map("niveau_stock_max")
+  pointCommande       Int?      @map("point_commande")
+  coutUnitaire        Decimal?  @map("cout_unitaire") @db.Decimal(10, 2)
+  prixVente           Decimal?  @map("prix_vente") @db.Decimal(10, 2)
+  tauxTaxe            Decimal   @default(0.00) @map("taux_taxe") @db.Decimal(5, 2)
+  
+  // Stock simple pour FREE tier
+  quantiteStock       Int       @default(0) @map("quantite_stock")
+  
+  estActif            Boolean   @default(true) @map("est_actif")
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  dateModification    DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  categorie           Categorie? @relation(fields: [categorieId], references: [id], onDelete: SetNull)
+  detailsCommande     DetailCommande[]
+  mouvementsStock     MouvementStock[]
+  
+  // Relations PREMIUM
+  inventaire          Inventaire[]
+  produitsFournisseurs ProduitFournisseur[]
+  lignesBonCommande   LigneBonCommandeAchat[]
+  lignesTransfert     LigneTransfertStock[]
+  lignesAjustement    LigneAjustementStock[]
+  lignesCommandeVente LigneCommandeVente[]
+  
+  @@index([reference])
+  @@index([nom])
+  @@index([categorieId])
+  @@map("produits")
+}
+
+model Client {
+  id            Int       @id @default(autoincrement())
+  nom           String    @db.VarChar(100)
+  email         String?   @db.VarChar(100)
+  telephone     String?   @db.VarChar(20)
+  adresse       String?   @db.Text
+  ville         String?   @db.VarChar(50)
+  pays          String?   @db.VarChar(50)
+  numeroFiscal  String?   @map("numero_fiscal") @db.VarChar(50)
+  estActif      Boolean   @default(true) @map("est_actif")
+  dateCreation  DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  commandes     Commande[]
+  commandesVente CommandeVente[]
+  
+  @@map("clients")
+}
+
+model Commande {
+  id              Int       @id @default(autoincrement())
+  numeroCommande  String    @unique @map("numero_commande") @db.VarChar(50)
+  clientId        Int?      @map("client_id")
+  dateCommande    DateTime  @map("date_commande") @db.Date
+  dateLivraison   DateTime? @map("date_livraison") @db.Date
+  statut          StatutCommande @default(EN_ATTENTE)
+  montantTotal    Decimal?  @map("montant_total") @db.Decimal(12, 2)
+  creePar         Int?      @map("cree_par")
+  dateCreation    DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  client          Client?   @relation(fields: [clientId], references: [id])
+  createur        Utilisateur? @relation("CommandeCreePar", fields: [creePar], references: [id])
+  details         DetailCommande[]
+  
+  @@index([numeroCommande])
+  @@index([statut])
+  @@map("commandes")
+}
+
+model DetailCommande {
+  id              Int       @id @default(autoincrement())
+  commandeId      Int       @map("commande_id")
+  produitId       Int       @map("produit_id")
+  quantite        Int
+  prixUnitaire    Decimal   @map("prix_unitaire") @db.Decimal(10, 2)
+  
+  // Relations
+  commande        Commande  @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+  produit         Produit   @relation(fields: [produitId], references: [id])
+  
+  @@map("details_commande")
+}
+
+model MouvementStock {
+  id              Int       @id @default(autoincrement())
+  produitId       Int       @map("produit_id")
+  entrepotId      Int?      @map("entrepot_id")
+  typeMouvement   TypeMouvement @map("type_mouvement")
+  quantite        Int
+  typeReference   String?   @map("type_reference") @db.VarChar(50)
+  referenceId     Int?      @map("reference_id")
+  raison          String?   @db.VarChar(255)
+  coutUnitaire    Decimal?  @map("cout_unitaire") @db.Decimal(10, 2)
+  effectuePar     Int?      @map("effectue_par")
+  dateMouvement   DateTime  @default(now()) @map("date_mouvement")
+  notes           String?   @db.Text
+  
+  // Relations
+  produit         Produit   @relation(fields: [produitId], references: [id])
+  entrepot        Entrepot? @relation(fields: [entrepotId], references: [id])
+  utilisateur     Utilisateur? @relation("MouvementEffectuePar", fields: [effectuePar], references: [id])
+  
+  @@index([produitId])
+  @@index([dateMouvement])
+  @@index([typeMouvement])
+  @@map("mouvements_stock")
+}
+
+enum StatutCommande {
+  EN_ATTENTE      @map("en_attente")
+  EN_TRAITEMENT   @map("en_traitement")
+  EXPEDIE         @map("expedie")
+  LIVRE           @map("livre")
+  ANNULE          @map("annule")
+}
+
+enum TypeMouvement {
+  ENTREE      @map("entree")
+  SORTIE      @map("sortie")
+  AJUSTEMENT  @map("ajustement")
+  TRANSFERT   @map("transfert")
+  RETOUR      @map("retour")
+}
+
+// ============================================
+// TABLES PREMIUM (PREMIUM TIER)
+// ============================================
+
+model Entrepot {
+  id              Int       @id @default(autoincrement())
+  nom             String    @db.VarChar(100)
+  code            String    @unique @db.VarChar(20)
+  adresse         String?   @db.Text
+  ville           String?   @db.VarChar(50)
+  pays            String?   @db.VarChar(50)
+  responsableId   Int?      @map("responsable_id")
+  capacite        Int?
+  estActif        Boolean   @default(true) @map("est_actif")
+  dateCreation    DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  responsable     Utilisateur? @relation("ResponsableEntrepot", fields: [responsableId], references: [id], onDelete: SetNull)
+  inventaire      Inventaire[]
+  mouvementsStock MouvementStock[]
+  transfertsSource TransfertStock[] @relation("TransfertSource")
+  transfertsDestination TransfertStock[] @relation("TransfertDestination")
+  ajustements     AjustementStock[]
+  bonsCommande    BonCommandeAchat[]
+  commandesVente  CommandeVente[]
+  
+  @@map("entrepots")
+}
+
+model Inventaire {
+  id                    Int       @id @default(autoincrement())
+  produitId             Int       @map("produit_id")
+  entrepotId            Int       @map("entrepot_id")
+  quantite              Int       @default(0)
+  quantiteReservee      Int       @default(0) @map("quantite_reservee")
+  emplacement           String?   @db.VarChar(50)
+  derniereVerification  DateTime? @map("derniere_verification")
+  dateModification      DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  produit               Produit   @relation(fields: [produitId], references: [id], onDelete: Cascade)
+  entrepot              Entrepot  @relation(fields: [entrepotId], references: [id], onDelete: Cascade)
+  
+  @@unique([produitId, entrepotId], name: "unique_produit_entrepot")
+  @@index([quantite])
+  @@index([entrepotId])
+  @@map("inventaire")
+}
+
+model ProduitFournisseur {
+  id                      Int       @id @default(autoincrement())
+  produitId               Int       @map("produit_id")
+  fournisseurId           Int       @map("fournisseur_id")
+  referenceFournisseur    String?   @map("reference_fournisseur") @db.VarChar(50)
+  delaiLivraisonJours     Int?      @map("delai_livraison_jours")
+  quantiteMinimumCommande Int       @default(1) @map("quantite_minimum_commande")
+  prixUnitaire            Decimal?  @map("prix_unitaire") @db.Decimal(10, 2)
+  estPrefere              Boolean   @default(false) @map("est_prefere")
+  dateCreation            DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  produit                 Produit      @relation(fields: [produitId], references: [id], onDelete: Cascade)
+  fournisseur             Fournisseur  @relation(fields: [fournisseurId], references: [id], onDelete: Cascade)
+  
+  @@unique([produitId, fournisseurId], name: "unique_produit_fournisseur")
+  @@map("produits_fournisseurs")
+}
+
+model BonCommandeAchat {
+  id                  Int       @id @default(autoincrement())
+  numeroCommande      String    @unique @map("numero_commande") @db.VarChar(50)
+  fournisseurId       Int       @map("fournisseur_id")
+  entrepotId          Int       @map("entrepot_id")
+  dateCommande        DateTime  @map("date_commande") @db.Date
+  dateLivraisonPrevue DateTime? @map("date_livraison_prevue") @db.Date
+  statut              StatutBonCommande @default(BROUILLON)
+  montantTotal        Decimal?  @map("montant_total") @db.Decimal(12, 2)
+  montantTaxe         Decimal?  @map("montant_taxe") @db.Decimal(12, 2)
+  notes               String?   @db.Text
+  creePar             Int?      @map("cree_par")
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  dateModification    DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  fournisseur         Fournisseur @relation(fields: [fournisseurId], references: [id])
+  entrepot            Entrepot    @relation(fields: [entrepotId], references: [id])
+  createur            Utilisateur? @relation("BonCommandeCreePar", fields: [creePar], references: [id])
+  lignes              LigneBonCommandeAchat[]
+  
+  @@index([numeroCommande])
+  @@index([statut])
+  @@index([fournisseurId])
+  @@index([dateCommande])
+  @@map("bons_commande_achat")
+}
+
+model LigneBonCommandeAchat {
+  id              Int       @id @default(autoincrement())
+  bonCommandeId   Int       @map("bon_commande_id")
+  produitId       Int       @map("produit_id")
+  quantite        Int
+  quantiteRecue   Int       @default(0) @map("quantite_recue")
+  prixUnitaire    Decimal   @map("prix_unitaire") @db.Decimal(10, 2)
+  tauxTaxe        Decimal   @default(0.00) @map("taux_taxe") @db.Decimal(5, 2)
+  
+  // Relations
+  bonCommande     BonCommandeAchat @relation(fields: [bonCommandeId], references: [id], onDelete: Cascade)
+  produit         Produit          @relation(fields: [produitId], references: [id])
+  
+  @@map("lignes_bon_commande_achat")
+}
+
+model TransfertStock {
+  id                    Int       @id @default(autoincrement())
+  numeroTransfert       String    @unique @map("numero_transfert") @db.VarChar(50)
+  entrepotSourceId      Int       @map("entrepot_source_id")
+  entrepotDestinationId Int       @map("entrepot_destination_id")
+  dateTransfert         DateTime  @map("date_transfert") @db.Date
+  statut                StatutTransfert @default(EN_ATTENTE)
+  notes                 String?   @db.Text
+  creePar               Int?      @map("cree_par")
+  dateCreation          DateTime  @default(now()) @map("date_creation")
+  dateCompletion        DateTime? @map("date_completion")
+  
+  // Relations
+  entrepotSource        Entrepot     @relation("TransfertSource", fields: [entrepotSourceId], references: [id])
+  entrepotDestination   Entrepot     @relation("TransfertDestination", fields: [entrepotDestinationId], references: [id])
+  createur              Utilisateur? @relation("TransfertCreePar", fields: [creePar], references: [id])
+  lignes                LigneTransfertStock[]
+  
+  @@map("transferts_stock")
+}
+
+model LigneTransfertStock {
+  id              Int       @id @default(autoincrement())
+  transfertId     Int       @map("transfert_id")
+  produitId       Int       @map("produit_id")
+  quantite        Int
+  quantiteRecue   Int       @default(0) @map("quantite_recue")
+  
+  // Relations
+  transfert       TransfertStock @relation(fields: [transfertId], references: [id], onDelete: Cascade)
+  produit         Produit        @relation(fields: [produitId], references: [id])
+  
+  @@map("lignes_transfert_stock")
+}
+
+model AjustementStock {
+  id                Int       @id @default(autoincrement())
+  numeroAjustement  String    @unique @map("numero_ajustement") @db.VarChar(50)
+  entrepotId        Int       @map("entrepot_id")
+  dateAjustement    DateTime  @map("date_ajustement") @db.Date
+  raison            RaisonAjustement
+  notes             String?   @db.Text
+  approuvePar       Int?      @map("approuve_par")
+  creePar           Int?      @map("cree_par")
+  dateCreation      DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  entrepot          Entrepot     @relation(fields: [entrepotId], references: [id])
+  approbateur       Utilisateur? @relation("AjustementApprouvePar", fields: [approuvePar], references: [id])
+  createur          Utilisateur? @relation("AjustementCreePar", fields: [creePar], references: [id])
+  lignes            LigneAjustementStock[]
+  
+  @@map("ajustements_stock")
+}
+
+model LigneAjustementStock {
+  id                Int       @id @default(autoincrement())
+  ajustementId      Int       @map("ajustement_id")
+  produitId         Int       @map("produit_id")
+  quantiteActuelle  Int       @map("quantite_actuelle")
+  quantiteAjustee   Int       @map("quantite_ajustee")
+  
+  // Relations
+  ajustement        AjustementStock @relation(fields: [ajustementId], references: [id], onDelete: Cascade)
+  produit           Produit         @relation(fields: [produitId], references: [id])
+  
+  @@map("lignes_ajustement_stock")
+}
+
+model CommandeVente {
+  id              Int       @id @default(autoincrement())
+  numeroCommande  String    @unique @map("numero_commande") @db.VarChar(50)
+  clientId        Int?      @map("client_id")
+  entrepotId      Int       @map("entrepot_id")
+  dateCommande    DateTime  @map("date_commande") @db.Date
+  dateLivraison   DateTime? @map("date_livraison") @db.Date
+  statut          StatutCommande @default(EN_ATTENTE)
+  montantTotal    Decimal?  @map("montant_total") @db.Decimal(12, 2)
+  creePar         Int?      @map("cree_par")
+  dateCreation    DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  client          Client?   @relation(fields: [clientId], references: [id])
+  entrepot        Entrepot  @relation(fields: [entrepotId], references: [id])
+  lignes          LigneCommandeVente[]
+  
+  @@map("commandes_vente")
+}
+
+model LigneCommandeVente {
+  id              Int       @id @default(autoincrement())
+  commandeVenteId Int       @map("commande_vente_id")
+  produitId       Int       @map("produit_id")
+  quantite        Int
+  prixUnitaire    Decimal   @map("prix_unitaire") @db.Decimal(10, 2)
+  
+  // Relations
+  commandeVente   CommandeVente @relation(fields: [commandeVenteId], references: [id], onDelete: Cascade)
+  produit         Produit       @relation(fields: [produitId], references: [id])
+  
+  @@map("lignes_commande_vente")
+}
+
+model JournalAudit {
+  id                 Int       @id @default(autoincrement())
+  utilisateurId      Int?      @map("utilisateur_id")
+  action             String    @db.VarChar(100)
+  nomTable           String?   @map("nom_table") @db.VarChar(50)
+  enregistrementId   Int?      @map("enregistrement_id")
+  anciennesValeurs   Json?     @map("anciennes_valeurs")
+  nouvellesValeurs   Json?     @map("nouvelles_valeurs")
+  adresseIp          String?   @map("adresse_ip") @db.VarChar(45)
+  dateCreation       DateTime  @default(now()) @map("date_creation")
+  
+  // Relations
+  utilisateur        Utilisateur? @relation(fields: [utilisateurId], references: [id])
+  
+  @@index([nomTable, enregistrementId])
+  @@index([dateCreation])
+  @@map("journal_audit")
+}
+
+enum StatutBonCommande {
+  BROUILLON   @map("brouillon")
+  EN_ATTENTE  @map("en_attente")
+  APPROUVE    @map("approuve")
+  RECU        @map("recu")
+  ANNULE      @map("annule")
+}
+
+enum StatutTransfert {
+  EN_ATTENTE  @map("en_attente")
+  EN_TRANSIT  @map("en_transit")
+  COMPLETE    @map("complete")
+  ANNULE      @map("annule")
+}
+
+enum RaisonAjustement {
+  INVENTAIRE_PHYSIQUE @map("inventaire_physique")
+  DOMMAGE             @map("dommage")
+  PERTE               @map("perte")
+  TROUVE              @map("trouve")
+  CORRECTION          @map("correction")
+  AUTRE               @map("autre")
+}
