@@ -1,16 +1,49 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  ArrayMinSize,
-  IsArray,
-  IsDateString,
   IsInt,
-  IsOptional,
   IsString,
-  MaxLength,
+  IsDateString,
+  IsOptional,
+  IsArray,
   ValidateNested,
+  Min,
+  ArrayMinSize,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { LigneTransfertDto } from './ligne-transfert.dto';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+/**
+ * DTO pour une ligne de transfert
+ */
+export class LigneTransfertDto {
+  /**
+   * ID du produit à transférer
+   * @example 42
+   */
+  @ApiProperty({
+    description: 'ID du produit',
+    example: 42,
+    type: Number,
+  })
+  @IsInt({ message: "L'ID du produit doit être un entier" })
+  @Type(() => Number)
+  produitId: number;
+
+  /**
+   * Quantité à transférer
+   * @example 50
+   * @minimum 1
+   */
+  @ApiProperty({
+    description: 'Quantité à transférer',
+    example: 50,
+    minimum: 1,
+  })
+  @IsInt({ message: 'La quantité doit être un entier' })
+  @Min(1, { message: 'La quantité doit être au moins 1' })
+  @Type(() => Number)
+  quantite: number;
+}
 
 /**
  * DTO pour créer un transfert de stock

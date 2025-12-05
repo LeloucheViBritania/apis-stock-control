@@ -23,7 +23,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 // Modules PREMIUM
 import { EntrepotsModule } from './modules/entrepots/entrepots.module';
 import { InventaireModule } from './modules/inventaire/inventaire.module';
-// import { TransfertsStockModule } from './modules/transferts-stock/transferts-stock.module';
+import { TransfertsStockModule } from './modules/transferts-stock/transferts-stock.module';
 // import { AjustementsStockModule } from './modules/ajustements-stock/ajustements-stock.module';
 // import { BonsCommandeAchatModule } from './modules/bons-commande-achat/bons-commande-achat.module';
  import { JournalAuditModule } from './modules/journal-audit/journal-audit.module';
@@ -68,7 +68,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     EntrepotsModule,
     // Décommentez pour activer les autres modules PREMIUM
      InventaireModule,
-    // TransfertsStockModule,
+     TransfertsStockModule,
     // AjustementsStockModule,
     // BonsCommandeAchatModule,
      JournalAuditModule,

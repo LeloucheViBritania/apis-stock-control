@@ -1,4 +1,8 @@
-import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -24,7 +28,7 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Nom d\'utilisateur ou email déjà utilisé');
+      throw new ConflictException("Nom d'utilisateur ou email déjà utilisé");
     }
 
     // Hasher le mot de passe
