@@ -305,8 +305,9 @@ export class EntrepotsService {
       );
     }
 
-    return this.prisma.entrepot.delete({ 
-      where: { id } 
+    return this.prisma.entrepot.update({ 
+      where: { id } ,
+      data: { estActif: false}
     });
   }
 

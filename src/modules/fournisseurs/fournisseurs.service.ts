@@ -145,7 +145,7 @@ export class FournisseursService {
       );
     }
 
-    return this.prisma.fournisseur.delete({ where: { id } });
+    return this.prisma.fournisseur.update({ where: { id }, data:{ estActif: false} });
   }
 
   /**

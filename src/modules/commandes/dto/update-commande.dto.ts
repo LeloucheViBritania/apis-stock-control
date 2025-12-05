@@ -1,4 +1,6 @@
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsEnum, IsOptional, IsArray, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { DetailCommandeDto} from './create-commande.dto'
 
 export class UpdateCommandeDto {
   @IsOptional()

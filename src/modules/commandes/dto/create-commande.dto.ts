@@ -1,7 +1,7 @@
 import { IsInt, IsOptional, IsDateString, IsArray, ValidateNested, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
-class DetailCommandeDto {
+export class DetailCommandeDto {
   @IsInt()
   produitId: number;
 

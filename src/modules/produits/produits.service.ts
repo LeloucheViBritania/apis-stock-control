@@ -45,6 +45,8 @@ export class ProduitsService {
 
     if (filters?.estActif !== undefined) {
       where.estActif = filters.estActif;
+    }else{
+      where.estActif = true;
     }
 
     if (filters?.search) {
@@ -176,8 +178,9 @@ export class ProduitsService {
   async remove(id: number) {
     await this.findOne(id);
 
-    return this.prisma.produit.delete({
+    return this.prisma.produit.update({
       where: { id },
+      data: {estActif: false}
     });
   }
 

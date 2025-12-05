@@ -107,8 +107,9 @@ export class ClientsService {
   async remove(id: number) {
     await this.findOne(id);
 
-    return this.prisma.client.delete({
+    return this.prisma.client.update({
       where: { id },
+      data: {estActif: false}
     });
   }
 

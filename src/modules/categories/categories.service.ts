@@ -33,6 +33,9 @@ export class CategoriesService {
 
   async findAll() {
     return this.prisma.categorie.findMany({
+      where: {
+      estActif: true, // On ne récupère que les catégories actives
+    },
       include: {
         categorieParente: true,
         sousCategories: true,
@@ -141,8 +144,9 @@ export class CategoriesService {
       );
     }
 
-    return this.prisma.categorie.delete({
+    return this.prisma.categorie.update({
       where: { id },
+      data:{estActif: false}
     });
   }
 

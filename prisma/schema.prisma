@@ -66,7 +66,7 @@ model Categorie {
   description         String?   @db.Text
   categorieParenteId  Int?      @map("categorie_parente_id")
   dateCreation        DateTime  @default(now()) @map("date_creation")
-  
+  estActif            Boolean   @default(true) @map("est_actif")
   // Relations
   categorieParente    Categorie?  @relation("CategorieHierarchie", fields: [categorieParenteId], references: [id], onDelete: SetNull)
   sousCategories      Categorie[] @relation("CategorieHierarchie")

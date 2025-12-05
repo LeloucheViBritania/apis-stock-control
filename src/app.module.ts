@@ -1,4 +1,3 @@
-
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -32,6 +31,8 @@ import { TransfertsStockModule } from './modules/transferts-stock/transferts-sto
 // Guards & Interceptors
 import { AuthGuard } from './common/guards/auth.guard';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
+// 1. IMPORTER LE MODULE ET LE GUARD THROTTLER
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 @Module({
   imports: [
@@ -40,6 +41,13 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
       isGlobal: true,
       envFilePath: '.env',
     }),
+
+    // 2. CONFIGURER LE THROTTLER GLOBALEMENT
+    // Ici : limite à 10 requêtes toutes les 60 secondes (1 minute)
+    ThrottlerModule.forRoot([{
+      ttl: 60000, // Temps en millisecondes (60s)
+      limit: 10,  // Nombre maximum de requêtes par IP durant ce laps de temps
+    }]),
 
     // JWT Configuration
     JwtModule.register({
@@ -75,6 +83,10 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     // RapportsModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     // Interceptor global pour l'audit log (PREMIUM uniquement)
     {
       provide: APP_INTERCEPTOR,
