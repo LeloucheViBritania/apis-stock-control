@@ -3,14 +3,16 @@ import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiSecurit
 import { DashboardService } from './dashboard.service';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { PremiumGuard } from '../../common/guards/premium.guard';
+import { Role, RolesGuard } from '../../common/guards/roles.guard';
 import { PremiumFeature } from '../../common/decorators/premium-feature.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { Feature } from '../../common/enums/features.enum';
 
 @ApiTags('Dashboard')
 @ApiBearerAuth()
 @ApiSecurity('premium-access')
 @Controller('dashboard')
-@UseGuards(AuthGuard, PremiumGuard)
+@UseGuards(AuthGuard, PremiumGuard, RolesGuard)
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
@@ -18,55 +20,9 @@ export class DashboardController {
   @PremiumFeature(Feature.DASHBOARD_BASIQUE)
   @ApiOperation({ 
     summary: 'Obtenir les statistiques globales du dashboard',
-    description: 'Retourne les statistiques globales de l\'utilisateur incluant : total des produits, produits en rupture, valeur totale du stock, mouvements récents, etc.'
+    description: 'Retourne les statistiques globales (KPIs) : total produits, ruptures, valeur stock, etc.'
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Statistiques globales récupérées avec succès',
-    schema: {
-      type: 'object',
-      properties: {
-        totalProduits: {
-          type: 'number',
-          example: 150,
-          description: 'Nombre total de produits'
-        },
-        produitsEnRupture: {
-          type: 'number',
-          example: 5,
-          description: 'Nombre de produits en rupture de stock'
-        },
-        valeurTotaleStock: {
-          type: 'number',
-          example: 125000.50,
-          description: 'Valeur totale du stock en devise'
-        },
-        mouvementsAujourdHui: {
-          type: 'number',
-          example: 23,
-          description: 'Nombre de mouvements de stock aujourd\'hui'
-        },
-        commandesEnCours: {
-          type: 'number',
-          example: 8,
-          description: 'Nombre de commandes en cours'
-        },
-        produitsAlerteSeuil: {
-          type: 'number',
-          example: 12,
-          description: 'Nombre de produits ayant atteint le seuil d\'alerte'
-        }
-      }
-    }
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Non authentifié - Token invalide ou manquant'
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Accès refusé - Fonctionnalité premium requise (DASHBOARD_BASIQUE)'
-  })
+  @ApiResponse({ status: 200, description: 'Statistiques récupérées avec succès' })
   getStatistiques(@Request() req) {
     return this.dashboardService.getStatistiquesGlobales(req.user.id);
   }
@@ -75,83 +31,9 @@ export class DashboardController {
   @PremiumFeature(Feature.DASHBOARD_BASIQUE)
   @ApiOperation({ 
     summary: 'Obtenir les activités récentes',
-    description: 'Retourne la liste des activités récentes (mouvements de stock, commandes, modifications, etc.)'
+    description: 'Retourne la liste des derniers mouvements de stock'
   })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Nombre maximum d\'activités à retourner',
-    example: 10
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Activités récentes récupérées avec succès',
-    schema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: {
-            type: 'string',
-            example: 'act_123456'
-          },
-          type: {
-            type: 'string',
-            enum: ['MOUVEMENT', 'COMMANDE', 'AJUSTEMENT', 'ALERTE'],
-            example: 'MOUVEMENT'
-          },
-          description: {
-            type: 'string',
-            example: 'Entrée de stock - 50 unités de Produit A'
-          },
-          produit: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                example: 'prod_789'
-              },
-              nom: {
-                type: 'string',
-                example: 'Produit A'
-              }
-            }
-          },
-          quantite: {
-            type: 'number',
-            example: 50
-          },
-          dateActivite: {
-            type: 'string',
-            format: 'date-time',
-            example: '2025-11-18T10:30:00Z'
-          },
-          utilisateur: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                example: 'user_456'
-              },
-              nom: {
-                type: 'string',
-                example: 'Jean Dupont'
-              }
-            }
-          }
-        }
-      }
-    }
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Non authentifié - Token invalide ou manquant'
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Accès refusé - Fonctionnalité premium requise (DASHBOARD_BASIQUE)'
-  })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
   getActivitesRecentes(@Query('limit') limit?: string) {
     return this.dashboardService.getActivitesRecentes(limit ? +limit : 10);
   }
@@ -159,158 +41,100 @@ export class DashboardController {
   @Get('top-produits')
   @PremiumFeature(Feature.DASHBOARD_BASIQUE)
   @ApiOperation({ 
-    summary: 'Obtenir les produits avec le plus de stock',
-    description: 'Retourne la liste des produits ayant les quantités en stock les plus élevées'
+    summary: 'Top produits (Stock)',
+    description: 'Retourne les produits ayant la plus grande quantité en stock (Dormant)'
   })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Nombre maximum de produits à retourner',
-    example: 5
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Top produits récupérés avec succès',
-    schema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: {
-            type: 'string',
-            example: 'prod_123'
-          },
-          nom: {
-            type: 'string',
-            example: 'Produit Premium'
-          },
-          reference: {
-            type: 'string',
-            example: 'REF-001'
-          },
-          quantite: {
-            type: 'number',
-            example: 500,
-            description: 'Quantité en stock'
-          },
-          valeurStock: {
-            type: 'number',
-            example: 25000.00,
-            description: 'Valeur totale du stock pour ce produit'
-          },
-          categorie: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                example: 'cat_456'
-              },
-              nom: {
-                type: 'string',
-                example: 'Électronique'
-              }
-            }
-          },
-          prixUnitaire: {
-            type: 'number',
-            example: 50.00
-          }
-        }
-      }
-    }
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Non authentifié - Token invalide ou manquant'
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Accès refusé - Fonctionnalité premium requise (DASHBOARD_BASIQUE)'
-  })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 5 })
   getTopProduits(@Query('limit') limit?: string) {
     return this.dashboardService.getProduitsTopStock(limit ? +limit : 5);
   }
 
   @Get('commandes-recentes')
   @PremiumFeature(Feature.DASHBOARD_BASIQUE)
+  @ApiOperation({ summary: 'Commandes récentes' })
+  getCommandesRecentes(@Query('limit') limit?: string) {
+    return this.dashboardService.getCommandesRecentes(limit ? +limit : 5);
+  }
+
+  // =================================================================
+  // NOUVELLES ROUTES (Business Intelligence)
+  // =================================================================
+
+  @Get('top-ventes')
+  @PremiumFeature(Feature.DASHBOARD_BASIQUE)
   @ApiOperation({ 
-    summary: 'Obtenir les commandes récentes',
-    description: 'Retourne la liste des commandes les plus récentes avec leur statut'
+    summary: 'Top produits (Ventes)',
+    description: 'Retourne les produits les plus vendus avec le chiffre d\'affaires généré'
   })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Nombre maximum de commandes à retourner',
-    example: 5
-  })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 5 })
   @ApiResponse({
     status: 200,
-    description: 'Commandes récentes récupérées avec succès',
+    description: 'Top ventes récupéré avec succès',
     schema: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          id: {
-            type: 'string',
-            example: 'cmd_789'
-          },
-          numeroCommande: {
-            type: 'string',
-            example: 'CMD-2025-0123'
-          },
-          dateCommande: {
-            type: 'string',
-            format: 'date-time',
-            example: '2025-11-15T14:30:00Z'
-          },
-          statut: {
-            type: 'string',
-            enum: ['EN_ATTENTE', 'EN_COURS', 'LIVREE', 'ANNULEE'],
-            example: 'EN_COURS'
-          },
-          fournisseur: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                example: 'four_456'
-              },
-              nom: {
-                type: 'string',
-                example: 'Fournisseur ABC'
-              }
-            }
-          },
-          montantTotal: {
-            type: 'number',
-            example: 15000.00
-          },
-          nombreArticles: {
-            type: 'number',
-            example: 25,
-            description: 'Nombre total d\'articles dans la commande'
-          },
-          dateLivraisonPrevue: {
-            type: 'string',
-            format: 'date-time',
-            example: '2025-11-25T00:00:00Z'
-          }
+          nom: { type: 'string', example: 'iPhone 13' },
+          totalVendu: { type: 'number', example: 150 },
+          chiffreAffairesGenere: { type: 'number', example: 150000 }
         }
       }
     }
   })
-  @ApiResponse({
-    status: 401,
-    description: 'Non authentifié - Token invalide ou manquant'
+  getTopVentes(@Query('limit') limit?: string) {
+    return this.dashboardService.getProduitsLesPlusVendus(limit ? +limit : 5);
+  }
+
+  @Get('alertes-stock')
+  @PremiumFeature(Feature.DASHBOARD_BASIQUE)
+  @ApiOperation({ 
+    summary: 'Détail des alertes de stock',
+    description: 'Retourne la liste détaillée des produits en dessous du seuil minimum pour réapprovisionnement'
   })
   @ApiResponse({
-    status: 403,
-    description: 'Accès refusé - Fonctionnalité premium requise (DASHBOARD_BASIQUE)'
+    status: 200,
+    description: 'Liste des alertes récupérée',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          nom: { type: 'string', example: 'Câble USB-C' },
+          quantiteStock: { type: 'number', example: 2 },
+          niveauStockMin: { type: 'number', example: 10 },
+          produitsFournisseurs: { type: 'array', items: { type: 'object' } }
+        }
+      }
+    }
   })
-  getCommandesRecentes(@Query('limit') limit?: string) {
-    return this.dashboardService.getCommandesRecentes(limit ? +limit : 5);
+  getAlertesStock() {
+    return this.dashboardService.getDetailsAlerteStock();
+  }
+
+  @Get('evolution-revenus')
+  @Roles(Role.ADMIN, Role.GESTIONNAIRE) // Sécurité renforcée pour les données financières
+  @PremiumFeature(Feature.DASHBOARD_BASIQUE)
+  @ApiOperation({ 
+    summary: 'Évolution des revenus (Admin/Gestionnaire)',
+    description: 'Retourne le chiffre d\'affaires mensuel sur les 12 derniers mois. Nécessite le rôle ADMIN ou GESTIONNAIRE.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Données financières récupérées',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          mois: { type: 'string', example: '2023-11' },
+          revenu: { type: 'number', example: 45000.50 }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 403, description: 'Accès interdit (Rôle insuffisant)' })
+  getEvolutionRevenus() {
+    return this.dashboardService.getEvolutionRevenus();
   }
 }

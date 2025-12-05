@@ -112,4 +112,76 @@ export class DashboardService {
       },
     });
   }
+
+  // ==========================================
+  // NOUVELLES MÉTHODES (Correctement intégrées)
+  // ==========================================
+
+  // 1. Pour savoir ce qui se vend le mieux (vs ce qui stocke le plus)
+  async getProduitsLesPlusVendus(limit: number = 5) {
+    const topVentes = await this.prisma.detailCommande.groupBy({
+      by: ['produitId'],
+      _sum: { quantite: true },
+      orderBy: { _sum: { quantite: 'desc' } },
+      take: limit,
+    });
+
+    // Récupérer les noms des produits associés
+    const produitsDetails = await this.prisma.produit.findMany({
+      where: { id: { in: topVentes.map((t) => t.produitId) } },
+      select: { id: true, nom: true, reference: true, prixVente: true },
+    });
+
+    return topVentes.map((vente) => {
+      const info = produitsDetails.find((p) => p.id === vente.produitId);
+      return {
+        ...info,
+        totalVendu: vente._sum.quantite,
+        chiffreAffairesGenere: (Number(info?.prixVente) || 0) * (vente._sum.quantite || 0)
+      };
+    });
+  }
+
+  // 2. Pour obtenir la liste précise des produits à réapprovisionner (pas juste le nombre)
+  async getDetailsAlerteStock() {
+    return this.prisma.produit.findMany({
+      where: {
+        estActif: true,
+        quantiteStock: { lte: this.prisma.produit.fields.niveauStockMin },
+      },
+      select: {
+        id: true, 
+        nom: true, 
+        quantiteStock: true, 
+        niveauStockMin: true,
+        // Optionnel: inclure le fournisseur pour commander vite
+        produitsFournisseurs: {
+          take: 1,
+          where: { estPrefere: true },
+          include: { fournisseur: { select: { nom: true, email: true } } }
+        }
+      },
+    });
+  }
+
+  // 3. Pour le graphique de revenus (Uniquement pour ADMIN/GESTIONNAIRE)
+  async getEvolutionRevenus() {
+    // Note: Cette requête brute est optimisée pour PostgreSQL
+    const result: any[] = await this.prisma.$queryRaw`
+      SELECT 
+        TO_CHAR(date_commande, 'YYYY-MM') as mois,
+        SUM(montant_total) as revenu
+      FROM commandes
+      WHERE statut = 'LIVRE'
+      GROUP BY mois
+      ORDER BY mois DESC
+      LIMIT 12
+    `;
+
+    // Conversion sécurisée des types (Postgres renvoie parfois des strings pour SUM)
+    return result.map(r => ({
+      mois: r.mois,
+      revenu: Number(r.revenu || 0)
+    }));
+  }
 }
