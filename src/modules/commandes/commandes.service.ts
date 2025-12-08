@@ -2,126 +2,145 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCommandeDto } from './dto/create-commande.dto';
 import { UpdateCommandeDto } from './dto/update-commande.dto';
+// 1. IMPORT DU GATEWAY
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class CommandesService {
-  constructor(private prisma: PrismaService) {}
-  async create(createCommandeDto: CreateCommandeDto, userId: number) {
-      // Générer un numéro de commande unique
-      const count = await this.prisma.commande.count();
-      const numeroCommande = `CMD-${String(count + 1).padStart(6, '0')}`;
+  constructor(
+    private prisma: PrismaService,
+    // 2. INJECTION DU GATEWAY
+    private notificationsGateway: NotificationsGateway
+  ) {}
 
-      // 1. Pré-vérification (Lecture seule)
-      // On garde cette partie pour une expérience utilisateur rapide, 
-      // mais ce n'est pas la sécurité réelle.
-      for (const detail of createCommandeDto.details) {
+  async create(createCommandeDto: CreateCommandeDto, userId: number) {
+    // Générer un numéro de commande unique
+    const count = await this.prisma.commande.count();
+    const numeroCommande = `CMD-${String(count + 1).padStart(6, '0')}`;
+
+    // 1. Pré-vérification (Lecture seule)
+    for (const detail of createCommandeDto.details) {
+      const produit = await this.prisma.produit.findUnique({
+        where: { id: detail.produitId },
+      });
+
+      if (!produit) {
+        throw new NotFoundException(`Produit #${detail.produitId} non trouvé`);
+      }
+
+      if (produit.quantiteStock < detail.quantite) {
+        throw new BadRequestException(
+          `Stock insuffisant pour ${produit.nom}. Disponible: ${produit.quantiteStock}`,
+        );
+      }
+    }
+
+    // Calculer le montant total et préparer les détails
+    let montantTotal = 0;
+    const detailsAvecPrix = await Promise.all(
+      createCommandeDto.details.map(async (detail) => {
         const produit = await this.prisma.produit.findUnique({
           where: { id: detail.produitId },
         });
+        const prix = detail.prixUnitaire || Number(produit?.prixVente || 0);
+        montantTotal += prix * detail.quantite;
+        return { ...detail, prixUnitaire: prix };
+      }),
+    );
 
-        if (!produit) {
-          throw new NotFoundException(`Produit #${detail.produitId} non trouvé`);
-        }
-        
-        // Cette vérification est utile mais pas "Thread-Safe"
-        if (produit.quantiteStock < detail.quantite) {
-          throw new BadRequestException(
-            `Stock insuffisant pour ${produit.nom}. Disponible: ${produit.quantiteStock}`,
-          );
-        }
-      }
-
-      // Calculer le montant total et préparer les détails
-      let montantTotal = 0;
-      const detailsAvecPrix = await Promise.all(
-        createCommandeDto.details.map(async (detail) => {
-          const produit = await this.prisma.produit.findUnique({
-            where: { id: detail.produitId },
-          });
-          const prix = detail.prixUnitaire || Number(produit?.prixVente || 0);
-          montantTotal += prix * detail.quantite;
-          return { ...detail, prixUnitaire: prix };
-        }),
-      );
-
-      // 2. Création avec Sécurité de Concurrence
-      return this.prisma.$transaction(async (tx) => {
-        // Créer la commande
-        const commande = await tx.commande.create({
-          data: {
-            numeroCommande,
-            clientId: createCommandeDto.clientId,
-            dateCommande: new Date(createCommandeDto.dateCommande),
-            dateLivraison: createCommandeDto.dateLivraison
-              ? new Date(createCommandeDto.dateLivraison)
-              : null,
-            montantTotal,
-            creePar: userId,
-            details: {
-              create: detailsAvecPrix.map((d) => ({
-                produitId: d.produitId,
-                quantite: d.quantite,
-                prixUnitaire: d.prixUnitaire,
-              })),
+    // 2. Création avec Sécurité de Concurrence
+    return this.prisma.$transaction(async (tx) => {
+      // Créer la commande
+      const commande = await tx.commande.create({
+        data: {
+          numeroCommande,
+          clientId: createCommandeDto.clientId,
+          dateCommande: new Date(createCommandeDto.dateCommande),
+          dateLivraison: createCommandeDto.dateLivraison
+            ? new Date(createCommandeDto.dateLivraison)
+            : null,
+          montantTotal,
+          creePar: userId,
+          details: {
+            create: detailsAvecPrix.map((d) => ({
+              produitId: d.produitId,
+              quantite: d.quantite,
+              prixUnitaire: d.prixUnitaire,
+            })),
+          },
+        },
+        include: {
+          client: true,
+          details: {
+            include: {
+              produit: true,
             },
           },
-          include: {
-            client: true,
-            details: {
-              include: {
-                produit: true,
-              },
-            },
+        },
+      });
+
+      // Réduire le stock des produits de manière ATOMIQUE
+      for (const detail of detailsAvecPrix) {
+        const updateResult = await tx.produit.updateMany({
+          where: { 
+            id: detail.produitId,
+            quantiteStock: {
+              gte: detail.quantite // Condition critique : Stock >= Quantité demandée
+            }
+          },
+          data: {
+            quantiteStock: { decrement: detail.quantite },
           },
         });
 
-        // Réduire le stock des produits de manière ATOMIQUE
-        for (const detail of detailsAvecPrix) {
-          // AMÉLIORATION SÉCURITÉ ICI :
-          // On utilise updateMany car cela permet de mettre une condition sur le stock (gte = Greater Than or Equal)
-          // Si le stock a changé juste avant cette ligne, la mise à jour échouera silencieusement (count: 0)
-          const updateResult = await tx.produit.updateMany({
-            where: { 
-              id: detail.produitId,
-              quantiteStock: {
-                gte: detail.quantite // Condition critique : Stock >= Quantité demandée
-              }
-            },
-            data: {
-              quantiteStock: { decrement: detail.quantite },
-            },
+        // Si count est 0, c'est que le stock a changé entre temps
+        if (updateResult.count === 0) {
+          const produitInfo = await tx.produit.findUnique({ 
+            where: { id: detail.produitId },
+            select: { nom: true }
           });
-
-          // Si count est 0, cela signifie que la condition 'gte' n'a pas été remplie au moment précis de l'écriture
-          if (updateResult.count === 0) {
-            const produitInfo = await tx.produit.findUnique({ 
-              where: { id: detail.produitId },
-              select: { nom: true }
-            });
-            
-            throw new BadRequestException(
-              `Échec de la commande : Stock insuffisant pour ${produitInfo?.nom || 'un produit'} (Conflit de concurrence détecté)`
-            );
-          }
-
-          // Créer un mouvement de stock
-          await tx.mouvementStock.create({
-            data: {
-              produitId: detail.produitId,
-              typeMouvement: 'SORTIE',
-              quantite: detail.quantite,
-              raison: `Commande ${numeroCommande}`,
-              typeReference: 'commande',
-              referenceId: commande.id,
-              effectuePar: userId,
-            },
-          });
+          
+          throw new BadRequestException(
+            `Échec de la commande : Stock insuffisant pour ${produitInfo?.nom || 'un produit'} (Conflit de concurrence détecté)`
+          );
         }
 
-        return commande;
-      });
+        // --- 3. LOGIQUE DE NOTIFICATION TEMPS RÉEL (AJOUTÉE) ---
+        // On récupère le produit mis à jour pour vérifier son nouveau stock
+        const produitAjour = await tx.produit.findUnique({
+          where: { id: detail.produitId },
+          select: { nom: true, quantiteStock: true, niveauStockMin: true } // On prend le 'niveauStockMin' du schéma
+        });
+
+        if (produitAjour && produitAjour.quantiteStock <= produitAjour.niveauStockMin) {
+           // Envoi du signal via WebSocket
+           this.notificationsGateway.sendStockAlert({
+             produit: produitAjour.nom,
+             stockRestant: produitAjour.quantiteStock,
+             message: `⚠️ ALERTE : Le stock de "${produitAjour.nom}" est critique ! (${produitAjour.quantiteStock} restants)`
+           });
+        }
+        // --------------------------------------------------------
+
+        // Créer un mouvement de stock
+        await tx.mouvementStock.create({
+          data: {
+            produitId: detail.produitId,
+            typeMouvement: 'SORTIE',
+            quantite: detail.quantite,
+            raison: `Commande ${numeroCommande}`,
+            typeReference: 'commande',
+            referenceId: commande.id,
+            effectuePar: userId,
+          },
+        });
+      }
+
+      return commande;
+    });
   }
 
+  // ... (Le reste des méthodes findAll, findOne, update, cancel, getStatistiques reste inchangé)
   async findAll(filters?: {
     statut?: string;
     clientId?: number;
