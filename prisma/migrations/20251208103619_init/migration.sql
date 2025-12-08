@@ -32,6 +32,8 @@ CREATE TABLE "utilisateurs" (
     "date_expiration" TIMESTAMP(3),
     "date_creation" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "date_modification" TIMESTAMP(3) NOT NULL,
+    "resetPasswordToken" TEXT,
+    "resetPasswordExpires" TIMESTAMP(3),
 
     CONSTRAINT "utilisateurs_pkey" PRIMARY KEY ("id")
 );
@@ -43,6 +45,7 @@ CREATE TABLE "categories" (
     "description" TEXT,
     "categorie_parente_id" INTEGER,
     "date_creation" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "est_actif" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "categories_pkey" PRIMARY KEY ("id")
 );
@@ -113,25 +116,28 @@ CREATE TABLE "commandes" (
     "id" SERIAL NOT NULL,
     "numero_commande" VARCHAR(50) NOT NULL,
     "client_id" INTEGER,
+    "entrepot_id" INTEGER,
     "date_commande" DATE NOT NULL,
     "date_livraison" DATE,
     "statut" "StatutCommande" NOT NULL DEFAULT 'en_attente',
     "montant_total" DECIMAL(12,2),
     "cree_par" INTEGER,
     "date_creation" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "date_modification" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "commandes_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "details_commande" (
+CREATE TABLE "lignes_commande" (
     "id" SERIAL NOT NULL,
     "commande_id" INTEGER NOT NULL,
     "produit_id" INTEGER NOT NULL,
     "quantite" INTEGER NOT NULL,
     "prix_unitaire" DECIMAL(10,2) NOT NULL,
+    "seuil_alerte" BOOLEAN NOT NULL DEFAULT true,
 
-    CONSTRAINT "details_commande_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "lignes_commande_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -283,33 +289,6 @@ CREATE TABLE "lignes_ajustement_stock" (
 );
 
 -- CreateTable
-CREATE TABLE "commandes_vente" (
-    "id" SERIAL NOT NULL,
-    "numero_commande" VARCHAR(50) NOT NULL,
-    "client_id" INTEGER,
-    "entrepot_id" INTEGER NOT NULL,
-    "date_commande" DATE NOT NULL,
-    "date_livraison" DATE,
-    "statut" "StatutCommande" NOT NULL DEFAULT 'en_attente',
-    "montant_total" DECIMAL(12,2),
-    "cree_par" INTEGER,
-    "date_creation" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "commandes_vente_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "lignes_commande_vente" (
-    "id" SERIAL NOT NULL,
-    "commande_vente_id" INTEGER NOT NULL,
-    "produit_id" INTEGER NOT NULL,
-    "quantite" INTEGER NOT NULL,
-    "prix_unitaire" DECIMAL(10,2) NOT NULL,
-
-    CONSTRAINT "lignes_commande_vente_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "journal_audit" (
     "id" SERIAL NOT NULL,
     "utilisateur_id" INTEGER,
@@ -331,6 +310,9 @@ CREATE UNIQUE INDEX "utilisateurs_nom_utilisateur_key" ON "utilisateurs"("nom_ut
 CREATE UNIQUE INDEX "utilisateurs_email_key" ON "utilisateurs"("email");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "utilisateurs_resetPasswordToken_key" ON "utilisateurs"("resetPasswordToken");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "produits_reference_key" ON "produits"("reference");
 
 -- CreateIndex
@@ -350,6 +332,12 @@ CREATE INDEX "commandes_numero_commande_idx" ON "commandes"("numero_commande");
 
 -- CreateIndex
 CREATE INDEX "commandes_statut_idx" ON "commandes"("statut");
+
+-- CreateIndex
+CREATE INDEX "commandes_client_id_idx" ON "commandes"("client_id");
+
+-- CreateIndex
+CREATE INDEX "commandes_entrepot_id_idx" ON "commandes"("entrepot_id");
 
 -- CreateIndex
 CREATE INDEX "mouvements_stock_produit_id_idx" ON "mouvements_stock"("produit_id");
@@ -397,9 +385,6 @@ CREATE UNIQUE INDEX "transferts_stock_numero_transfert_key" ON "transferts_stock
 CREATE UNIQUE INDEX "ajustements_stock_numero_ajustement_key" ON "ajustements_stock"("numero_ajustement");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "commandes_vente_numero_commande_key" ON "commandes_vente"("numero_commande");
-
--- CreateIndex
 CREATE INDEX "journal_audit_nom_table_enregistrement_id_idx" ON "journal_audit"("nom_table", "enregistrement_id");
 
 -- CreateIndex
@@ -415,13 +400,16 @@ ALTER TABLE "produits" ADD CONSTRAINT "produits_categorie_id_fkey" FOREIGN KEY (
 ALTER TABLE "commandes" ADD CONSTRAINT "commandes_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "commandes" ADD CONSTRAINT "commandes_entrepot_id_fkey" FOREIGN KEY ("entrepot_id") REFERENCES "entrepots"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "commandes" ADD CONSTRAINT "commandes_cree_par_fkey" FOREIGN KEY ("cree_par") REFERENCES "utilisateurs"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "details_commande" ADD CONSTRAINT "details_commande_commande_id_fkey" FOREIGN KEY ("commande_id") REFERENCES "commandes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "lignes_commande" ADD CONSTRAINT "lignes_commande_commande_id_fkey" FOREIGN KEY ("commande_id") REFERENCES "commandes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "details_commande" ADD CONSTRAINT "details_commande_produit_id_fkey" FOREIGN KEY ("produit_id") REFERENCES "produits"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "lignes_commande" ADD CONSTRAINT "lignes_commande_produit_id_fkey" FOREIGN KEY ("produit_id") REFERENCES "produits"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "mouvements_stock" ADD CONSTRAINT "mouvements_stock_produit_id_fkey" FOREIGN KEY ("produit_id") REFERENCES "produits"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -491,18 +479,6 @@ ALTER TABLE "lignes_ajustement_stock" ADD CONSTRAINT "lignes_ajustement_stock_aj
 
 -- AddForeignKey
 ALTER TABLE "lignes_ajustement_stock" ADD CONSTRAINT "lignes_ajustement_stock_produit_id_fkey" FOREIGN KEY ("produit_id") REFERENCES "produits"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "commandes_vente" ADD CONSTRAINT "commandes_vente_client_id_fkey" FOREIGN KEY ("client_id") REFERENCES "clients"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "commandes_vente" ADD CONSTRAINT "commandes_vente_entrepot_id_fkey" FOREIGN KEY ("entrepot_id") REFERENCES "entrepots"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "lignes_commande_vente" ADD CONSTRAINT "lignes_commande_vente_commande_vente_id_fkey" FOREIGN KEY ("commande_vente_id") REFERENCES "commandes_vente"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "lignes_commande_vente" ADD CONSTRAINT "lignes_commande_vente_produit_id_fkey" FOREIGN KEY ("produit_id") REFERENCES "produits"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "journal_audit" ADD CONSTRAINT "journal_audit_utilisateur_id_fkey" FOREIGN KEY ("utilisateur_id") REFERENCES "utilisateurs"("id") ON DELETE SET NULL ON UPDATE CASCADE;

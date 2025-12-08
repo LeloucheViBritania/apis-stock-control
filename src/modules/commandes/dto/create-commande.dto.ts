@@ -18,6 +18,11 @@ export class CreateCommandeDto {
   @IsInt()
   clientId?: number;
 
+  // NOUVEAU : Champ pour le mode Premium
+  @IsOptional()
+  @IsInt()
+  entrepotId?: number;
+
   @IsDateString()
   dateCommande: string;
 

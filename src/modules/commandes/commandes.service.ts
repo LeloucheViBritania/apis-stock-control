@@ -2,14 +2,12 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCommandeDto } from './dto/create-commande.dto';
 import { UpdateCommandeDto } from './dto/update-commande.dto';
-// 1. IMPORT DU GATEWAY
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 @Injectable()
 export class CommandesService {
   constructor(
     private prisma: PrismaService,
-    // 2. INJECTION DU GATEWAY
     private notificationsGateway: NotificationsGateway
   ) {}
 
@@ -17,9 +15,12 @@ export class CommandesService {
     // Générer un numéro de commande unique
     const count = await this.prisma.commande.count();
     const numeroCommande = `CMD-${String(count + 1).padStart(6, '0')}`;
+    const { entrepotId, details } = createCommandeDto;
 
-    // 1. Pré-vérification (Lecture seule)
-    for (const detail of createCommandeDto.details) {
+    // =========================================================
+    // 1. PRÉ-VÉRIFICATION DU STOCK (Lecture seule)
+    // =========================================================
+    for (const detail of details) {
       const produit = await this.prisma.produit.findUnique({
         where: { id: detail.produitId },
       });
@@ -28,17 +29,43 @@ export class CommandesService {
         throw new NotFoundException(`Produit #${detail.produitId} non trouvé`);
       }
 
-      if (produit.quantiteStock < detail.quantite) {
-        throw new BadRequestException(
-          `Stock insuffisant pour ${produit.nom}. Disponible: ${produit.quantiteStock}`,
-        );
+      // --- LOGIQUE PREMIUM : Vérification stock Entrepôt ---
+      if (entrepotId) {
+        const inventaire = await this.prisma.inventaire.findUnique({
+          where: {
+            unique_produit_entrepot: {
+              produitId: detail.produitId,
+              entrepotId: entrepotId
+            }
+          }
+        });
+
+        if (!inventaire) {
+           throw new BadRequestException(`Produit ${produit.nom} non référencé dans l'entrepôt #${entrepotId}`);
+        }
+
+        // On vérifie le stock disponible (Quantité réelle - Quantité réservée)
+        const disponible = inventaire.quantite - inventaire.quantiteReservee;
+        if (disponible < detail.quantite) {
+          throw new BadRequestException(
+            `Stock insuffisant à l'entrepôt pour ${produit.nom}. Disponible: ${disponible}`
+          );
+        }
+      } 
+      // --- LOGIQUE FREE : Vérification stock Global ---
+      else {
+        if (produit.quantiteStock < detail.quantite) {
+          throw new BadRequestException(
+            `Stock insuffisant pour ${produit.nom}. Disponible: ${produit.quantiteStock}`,
+          );
+        }
       }
     }
 
-    // Calculer le montant total et préparer les détails
+    // Calculer le montant total
     let montantTotal = 0;
     const detailsAvecPrix = await Promise.all(
-      createCommandeDto.details.map(async (detail) => {
+      details.map(async (detail) => {
         const produit = await this.prisma.produit.findUnique({
           where: { id: detail.produitId },
         });
@@ -48,20 +75,24 @@ export class CommandesService {
       }),
     );
 
-    // 2. Création avec Sécurité de Concurrence
+    // =========================================================
+    // 2. TRANSACTION DE CRÉATION (Écriture atomique)
+    // =========================================================
     return this.prisma.$transaction(async (tx) => {
-      // Créer la commande
+      // A. Créer la commande (Table unifiée)
       const commande = await tx.commande.create({
         data: {
           numeroCommande,
           clientId: createCommandeDto.clientId,
+          entrepotId: entrepotId || null, // Important pour la distinction
           dateCommande: new Date(createCommandeDto.dateCommande),
           dateLivraison: createCommandeDto.dateLivraison
             ? new Date(createCommandeDto.dateLivraison)
             : null,
           montantTotal,
           creePar: userId,
-          details: {
+          // Attention : 'lignes' correspond au nouveau nom dans le schema.prisma
+          lignes: {
             create: detailsAvecPrix.map((d) => ({
               produitId: d.produitId,
               quantite: d.quantite,
@@ -71,7 +102,7 @@ export class CommandesService {
         },
         include: {
           client: true,
-          details: {
+          lignes: { // On inclut les lignes nouvellement créées
             include: {
               produit: true,
             },
@@ -79,53 +110,79 @@ export class CommandesService {
         },
       });
 
-      // Réduire le stock des produits de manière ATOMIQUE
+      // B. Décrémenter le stock selon le mode
       for (const detail of detailsAvecPrix) {
-        const updateResult = await tx.produit.updateMany({
-          where: { 
-            id: detail.produitId,
-            quantiteStock: {
-              gte: detail.quantite // Condition critique : Stock >= Quantité demandée
-            }
-          },
-          data: {
-            quantiteStock: { decrement: detail.quantite },
-          },
-        });
+        let stockRestantPourAlerte = 0;
+        let produitNom = '';
+        let niveauMin = 0;
 
-        // Si count est 0, c'est que le stock a changé entre temps
-        if (updateResult.count === 0) {
-          const produitInfo = await tx.produit.findUnique({ 
-            where: { id: detail.produitId },
-            select: { nom: true }
+        // --- CAS PREMIUM : Update Inventaire ---
+        if (entrepotId) {
+          // Utilisation de updateMany pour la sécurité de concurrence (clause where gte)
+          const updateResult = await tx.inventaire.updateMany({
+            where: {
+              produitId: detail.produitId,
+              entrepotId: entrepotId,
+              quantite: { gte: detail.quantite } // Sécurité atomique
+            },
+            data: {
+              quantite: { decrement: detail.quantite }
+            }
           });
-          
-          throw new BadRequestException(
-            `Échec de la commande : Stock insuffisant pour ${produitInfo?.nom || 'un produit'} (Conflit de concurrence détecté)`
-          );
+
+          if (updateResult.count === 0) {
+            throw new BadRequestException(`Conflit de stock (Premium) sur le produit ID ${detail.produitId}`);
+          }
+
+          // Récupérer infos pour alerte
+          const invAjour = await tx.inventaire.findUnique({
+            where: { unique_produit_entrepot: { produitId: detail.produitId, entrepotId } },
+            include: { produit: true }
+          });
+          stockRestantPourAlerte = invAjour.quantite;
+          produitNom = invAjour.produit.nom;
+          niveauMin = invAjour.produit.niveauStockMin;
+        } 
+        
+        // --- CAS FREE : Update Produit ---
+        else {
+          const updateResult = await tx.produit.updateMany({
+            where: { 
+              id: detail.produitId,
+              quantiteStock: { gte: detail.quantite } // Sécurité atomique
+            },
+            data: {
+              quantiteStock: { decrement: detail.quantite },
+            },
+          });
+
+          if (updateResult.count === 0) {
+             throw new BadRequestException(`Conflit de stock (Free) sur le produit ID ${detail.produitId}`);
+          }
+
+          // Récupérer infos pour alerte
+          const prodAjour = await tx.produit.findUnique({
+             where: { id: detail.produitId } 
+          });
+          stockRestantPourAlerte = prodAjour.quantiteStock;
+          produitNom = prodAjour.nom;
+          niveauMin = prodAjour.niveauStockMin;
         }
 
-        // --- 3. LOGIQUE DE NOTIFICATION TEMPS RÉEL (AJOUTÉE) ---
-        // On récupère le produit mis à jour pour vérifier son nouveau stock
-        const produitAjour = await tx.produit.findUnique({
-          where: { id: detail.produitId },
-          select: { nom: true, quantiteStock: true, niveauStockMin: true } // On prend le 'niveauStockMin' du schéma
-        });
-
-        if (produitAjour && produitAjour.quantiteStock <= produitAjour.niveauStockMin) {
-           // Envoi du signal via WebSocket
+        // C. Gestion des Alertes WebSocket
+        if (stockRestantPourAlerte <= niveauMin) {
            this.notificationsGateway.sendStockAlert({
-             produit: produitAjour.nom,
-             stockRestant: produitAjour.quantiteStock,
-             message: `⚠️ ALERTE : Le stock de "${produitAjour.nom}" est critique ! (${produitAjour.quantiteStock} restants)`
+             produit: produitNom,
+             stockRestant: stockRestantPourAlerte,
+             message: `⚠️ ALERTE STOCK : "${produitNom}" est bas (${stockRestantPourAlerte}) ${entrepotId ? `dans l'entrepôt #${entrepotId}` : '(Global)'}`
            });
         }
-        // --------------------------------------------------------
 
-        // Créer un mouvement de stock
+        // D. Créer le mouvement de stock
         await tx.mouvementStock.create({
           data: {
             produitId: detail.produitId,
+            entrepotId: entrepotId || null, // Null si Free tier
             typeMouvement: 'SORTIE',
             quantite: detail.quantite,
             raison: `Commande ${numeroCommande}`,
@@ -140,7 +197,7 @@ export class CommandesService {
     });
   }
 
-  // ... (Le reste des méthodes findAll, findOne, update, cancel, getStatistiques reste inchangé)
+  // Adapter aussi findAll pour inclure 'lignes' au lieu de 'details'
   async findAll(filters?: {
     statut?: string;
     clientId?: number;
@@ -154,23 +211,13 @@ export class CommandesService {
     const skip = (page - 1) * limit;
 
     const where: any = {};
-
-    if (filters?.statut) {
-      where.statut = filters.statut;
-    }
-
-    if (filters?.clientId) {
-      where.clientId = filters.clientId;
-    }
-
+    // ... (logique de filtrage identique) ...
+    if (filters?.statut) where.statut = filters.statut;
+    if (filters?.clientId) where.clientId = filters.clientId;
     if (filters?.dateDebut || filters?.dateFin) {
-      where.dateCommande = {};
-      if (filters.dateDebut) {
-        where.dateCommande.gte = new Date(filters.dateDebut);
-      }
-      if (filters.dateFin) {
-        where.dateCommande.lte = new Date(filters.dateFin);
-      }
+        where.dateCommande = {};
+        if (filters.dateDebut) where.dateCommande.gte = new Date(filters.dateDebut);
+        if (filters.dateFin) where.dateCommande.lte = new Date(filters.dateFin);
     }
 
     const [commandes, total] = await Promise.all([
@@ -178,7 +225,8 @@ export class CommandesService {
         where,
         include: {
           client: true,
-          details: {
+          entrepot: true, // On peut maintenant voir l'entrepôt
+          lignes: {       // RENOMMAGE ICI
             include: {
               produit: true,
             },
@@ -193,33 +241,21 @@ export class CommandesService {
 
     return {
       data: commandes,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 
+  // Adapter findOne
   async findOne(id: number) {
     const commande = await this.prisma.commande.findUnique({
       where: { id },
       include: {
         client: true,
-        createur: {
-          select: {
-            id: true,
-            nomComplet: true,
-          },
-        },
-        details: {
+        entrepot: true,
+        createur: { select: { id: true, nomComplet: true } },
+        lignes: { // RENOMMAGE ICI
           include: {
-            produit: {
-              include: {
-                categorie: true,
-              },
-            },
+            produit: { include: { categorie: true } },
           },
         },
       },
@@ -228,55 +264,47 @@ export class CommandesService {
     if (!commande) {
       throw new NotFoundException(`Commande #${id} non trouvée`);
     }
-
     return commande;
   }
 
-  async update(id: number, updateCommandeDto: UpdateCommandeDto) {
-    await this.findOne(id);
-
-    return this.prisma.commande.update({
-      where: { id },
-      data: updateCommandeDto,
-      include: {
-        client: true,
-        details: {
-          include: {
-            produit: true,
-          },
-        },
-      },
-    });
-  }
-
+  // Adapter cancel
   async cancel(id: number, userId: number) {
     const commande = await this.findOne(id);
 
-    if (commande.statut === 'ANNULE') {
-      throw new BadRequestException('Cette commande est déjà annulée');
-    }
+    if (commande.statut === 'ANNULE') throw new BadRequestException('Déjà annulée');
+    if (commande.statut === 'LIVRE') throw new BadRequestException('Déjà livrée');
 
-    if (commande.statut === 'LIVRE') {
-      throw new BadRequestException('Impossible d\'annuler une commande déjà livrée');
-    }
-
-    // Transaction pour annuler et restaurer le stock
     return this.prisma.$transaction(async (tx) => {
       // Restaurer le stock
-      for (const detail of commande.details) {
-        await tx.produit.update({
-          where: { id: detail.produitId },
-          data: {
-            quantiteStock: { increment: detail.quantite },
-          },
-        });
+      for (const ligne of commande.lignes) { // 'lignes' ici
+        
+        // --- RESTAURATION PREMIUM ---
+        if (commande.entrepotId) {
+             await tx.inventaire.upsert({
+                where: { unique_produit_entrepot: { produitId: ligne.produitId, entrepotId: commande.entrepotId }},
+                update: { quantite: { increment: ligne.quantite } },
+                create: { 
+                    produitId: ligne.produitId, 
+                    entrepotId: commande.entrepotId, 
+                    quantite: ligne.quantite 
+                } // Cas rare où l'inventaire aurait été supprimé entre temps
+             });
+        } 
+        // --- RESTAURATION FREE ---
+        else {
+            await tx.produit.update({
+                where: { id: ligne.produitId },
+                data: { quantiteStock: { increment: ligne.quantite } },
+            });
+        }
 
-        // Créer un mouvement de stock
+        // Créer mouvement RETOUR
         await tx.mouvementStock.create({
           data: {
-            produitId: detail.produitId,
-            typeMouvement: 'ENTREE',
-            quantite: detail.quantite,
+            produitId: ligne.produitId,
+            entrepotId: commande.entrepotId || null,
+            typeMouvement: 'RETOUR', // Correction logique : c'est un retour en stock
+            quantite: ligne.quantite,
             raison: `Annulation commande ${commande.numeroCommande}`,
             typeReference: 'commande',
             referenceId: commande.id,
@@ -285,24 +313,19 @@ export class CommandesService {
         });
       }
 
-      // Mettre à jour le statut
+      // Update Statut
       return tx.commande.update({
         where: { id },
         data: { statut: 'ANNULE' },
-        include: {
-          client: true,
-          details: {
-            include: {
-              produit: true,
-            },
-          },
-        },
+        include: { lignes: true }
       });
     });
   }
 
+  // getStatistiques reste inchangé sauf si vous voulez filtrer par entrepotId
   async getStatistiques() {
-    const [total, enCours, completees, annulees, montantTotal] = await Promise.all([
+      // ... code existant ...
+      const [total, enCours, completees, annulees, montantTotal] = await Promise.all([
       this.prisma.commande.count(),
       this.prisma.commande.count({
         where: { statut: { in: ['EN_ATTENTE', 'EN_TRAITEMENT', 'EXPEDIE'] } },

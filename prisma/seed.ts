@@ -6,28 +6,41 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Début du seeding...');
 
-  // Nettoyer la base de données
+  // ============================================
+  // 1. NETTOYAGE (Ordre respectant les Foreign Keys)
+  // ============================================
   console.log('🧹 Nettoyage de la base de données...');
+  
+  // Tables dépendantes (Lignes et détails)
   await prisma.journalAudit.deleteMany();
   await prisma.ligneAjustementStock.deleteMany();
-  await prisma.ajustementStock.deleteMany();
   await prisma.ligneTransfertStock.deleteMany();
-  await prisma.transfertStock.deleteMany();
   await prisma.ligneBonCommandeAchat.deleteMany();
+  // MODIFICATION ICI : On utilise la nouvelle table unifiée
+  await prisma.ligneCommande.deleteMany(); 
+  
+  // Tables principales de mouvement/transaction
+  await prisma.ajustementStock.deleteMany();
+  await prisma.transfertStock.deleteMany();
   await prisma.bonCommandeAchat.deleteMany();
-  await prisma.ligneCommandeVente.deleteMany();
-  await prisma.commandeVente.deleteMany();
-  await prisma.detailCommande.deleteMany();
   await prisma.commande.deleteMany();
   await prisma.mouvementStock.deleteMany();
+  
+  // Tables de liaison et stock
   await prisma.inventaire.deleteMany();
   await prisma.produitFournisseur.deleteMany();
+  
+  // Entités de base
   await prisma.produit.deleteMany();
   await prisma.categorie.deleteMany();
   await prisma.client.deleteMany();
   await prisma.fournisseur.deleteMany();
   await prisma.entrepot.deleteMany();
   await prisma.utilisateur.deleteMany();
+
+  // ============================================
+  // 2. CRÉATION DES DONNÉES
+  // ============================================
 
   // Créer des utilisateurs
   console.log('👥 Création des utilisateurs...');
@@ -176,7 +189,7 @@ async function main() {
       niveauStockMin: 5,
       niveauStockMax: 50,
       pointCommande: 10,
-      quantiteStock: 15,
+      quantiteStock: 15, // Stock Free Tier
     },
   });
 
@@ -194,7 +207,7 @@ async function main() {
       niveauStockMin: 10,
       niveauStockMax: 100,
       pointCommande: 20,
-      quantiteStock: 25,
+      quantiteStock: 25, // Stock Free Tier
     },
   });
 
@@ -212,7 +225,7 @@ async function main() {
       niveauStockMin: 50,
       niveauStockMax: 500,
       pointCommande: 100,
-      quantiteStock: 200,
+      quantiteStock: 200, // Stock Free Tier
     },
   });
 
