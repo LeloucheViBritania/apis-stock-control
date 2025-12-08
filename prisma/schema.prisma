@@ -31,6 +31,10 @@ model Utilisateur {
   
   dateCreation      DateTime  @default(now()) @map("date_creation")
   dateModification  DateTime  @updatedAt @map("date_modification")
+
+  // Gestion reinitialisation de mot de passe
+  resetPasswordToken   String?   @unique
+  resetPasswordExpires DateTime?
   
   // Relations
   entrepotsGeres    Entrepot[] @relation("ResponsableEntrepot")
@@ -124,7 +128,7 @@ model Produit {
   
   // Relations
   categorie           Categorie? @relation(fields: [categorieId], references: [id], onDelete: SetNull)
-  detailsCommande     DetailCommande[]
+  lignesCommande      LigneCommande[]
   mouvementsStock     MouvementStock[]
   
   // Relations PREMIUM
@@ -133,7 +137,6 @@ model Produit {
   lignesBonCommande   LigneBonCommandeAchat[]
   lignesTransfert     LigneTransfertStock[]
   lignesAjustement    LigneAjustementStock[]
-  lignesCommandeVente LigneCommandeVente[]
   
   @@index([reference])
   @@index([nom])
@@ -155,7 +158,6 @@ model Client {
   
   // Relations
   commandes     Commande[]
-  commandesVente CommandeVente[]
   
   @@map("clients")
 }
@@ -163,28 +165,37 @@ model Client {
 model Commande {
   id              Int       @id @default(autoincrement())
   numeroCommande  String    @unique @map("numero_commande") @db.VarChar(50)
+  
   clientId        Int?      @map("client_id")
+  entrepotId      Int?      @map("entrepot_id") // Pour le mode Premium/Multi-entrepôts
+  
   dateCommande    DateTime  @map("date_commande") @db.Date
   dateLivraison   DateTime? @map("date_livraison") @db.Date
   statut          StatutCommande @default(EN_ATTENTE)
   montantTotal    Decimal?  @map("montant_total") @db.Decimal(12, 2)
+  
   creePar         Int?      @map("cree_par")
   dateCreation    DateTime  @default(now()) @map("date_creation")
+  dateModification DateTime @updatedAt @map("date_modification")
   
   // Relations
-  client          Client?   @relation(fields: [clientId], references: [id])
+  client          Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  entrepot        Entrepot? @relation(fields: [entrepotId], references: [id], onDelete: SetNull)
   createur        Utilisateur? @relation("CommandeCreePar", fields: [creePar], references: [id])
-  details         DetailCommande[]
+  lignes          LigneCommande[]
   
   @@index([numeroCommande])
   @@index([statut])
+  @@index([clientId])
+  @@index([entrepotId])
   @@map("commandes")
 }
 
-model DetailCommande {
+model LigneCommande {
   id              Int       @id @default(autoincrement())
   commandeId      Int       @map("commande_id")
   produitId       Int       @map("produit_id")
+  
   quantite        Int
   prixUnitaire    Decimal   @map("prix_unitaire") @db.Decimal(10, 2)
   seuilAlerte     Boolean   @default(true) @map("seuil_alerte")
@@ -193,7 +204,7 @@ model DetailCommande {
   commande        Commande  @relation(fields: [commandeId], references: [id], onDelete: Cascade)
   produit         Produit   @relation(fields: [produitId], references: [id])
   
-  @@map("details_commande")
+  @@map("lignes_commande")
 }
 
 model MouvementStock {
@@ -261,7 +272,7 @@ model Entrepot {
   transfertsDestination TransfertStock[] @relation("TransfertDestination")
   ajustements     AjustementStock[]
   bonsCommande    BonCommandeAchat[]
-  commandesVente  CommandeVente[]
+  commandes       Commande[]
   
   @@map("entrepots")
 }
@@ -287,7 +298,7 @@ model Inventaire {
 }
 
 model ProduitFournisseur {
-  id                      Int       @id @default(autoincrement())
+  id              Int       @id @default(autoincrement())
   produitId               Int       @map("produit_id")
   fournisseurId           Int       @map("fournisseur_id")
   referenceFournisseur    String?   @map("reference_fournisseur") @db.VarChar(50)
@@ -350,7 +361,7 @@ model LigneBonCommandeAchat {
 }
 
 model TransfertStock {
-  id                    Int       @id @default(autoincrement())
+  id              Int       @id @default(autoincrement())
   numeroTransfert       String    @unique @map("numero_transfert") @db.VarChar(50)
   entrepotSourceId      Int       @map("entrepot_source_id")
   entrepotDestinationId Int       @map("entrepot_destination_id")
@@ -416,40 +427,6 @@ model LigneAjustementStock {
   produit           Produit         @relation(fields: [produitId], references: [id])
   
   @@map("lignes_ajustement_stock")
-}
-
-model CommandeVente {
-  id              Int       @id @default(autoincrement())
-  numeroCommande  String    @unique @map("numero_commande") @db.VarChar(50)
-  clientId        Int?      @map("client_id")
-  entrepotId      Int       @map("entrepot_id")
-  dateCommande    DateTime  @map("date_commande") @db.Date
-  dateLivraison   DateTime? @map("date_livraison") @db.Date
-  statut          StatutCommande @default(EN_ATTENTE)
-  montantTotal    Decimal?  @map("montant_total") @db.Decimal(12, 2)
-  creePar         Int?      @map("cree_par")
-  dateCreation    DateTime  @default(now()) @map("date_creation")
-  
-  // Relations
-  client          Client?   @relation(fields: [clientId], references: [id])
-  entrepot        Entrepot  @relation(fields: [entrepotId], references: [id])
-  lignes          LigneCommandeVente[]
-  
-  @@map("commandes_vente")
-}
-
-model LigneCommandeVente {
-  id              Int       @id @default(autoincrement())
-  commandeVenteId Int       @map("commande_vente_id")
-  produitId       Int       @map("produit_id")
-  quantite        Int
-  prixUnitaire    Decimal   @map("prix_unitaire") @db.Decimal(10, 2)
-  
-  // Relations
-  commandeVente   CommandeVente @relation(fields: [commandeVenteId], references: [id], onDelete: Cascade)
-  produit         Produit       @relation(fields: [produitId], references: [id])
-  
-  @@map("lignes_commande_vente")
 }
 
 model JournalAudit {
