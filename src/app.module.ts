@@ -34,6 +34,11 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
 // 1. IMPORTER LE MODULE ET LE GUARD THROTTLER
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
+
+import { ScheduleModule } from '@nestjs/schedule';
+import { MailerModule } from '@nestjs-modules/mailer';
+import { NotificationsModule } from './modules/notifications/notifications.module'; // On va le créer après
+
 @Module({
   imports: [
     // Configuration globale
@@ -81,6 +86,28 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
     // BonsCommandeAchatModule,
      JournalAuditModule,
     // RapportsModule,
+
+
+    // 1. Activer le Scheduler
+    ScheduleModule.forRoot(),
+
+    // 2. Configurer le Mailer (Exemple avec Gmail ou SMTP classique)
+    MailerModule.forRoot({
+      transport: {
+        host: process.env.MAIL_HOST || 'smtp.gmail.com',
+        port: Number(process.env.MAIL_PORT) || 587,
+        secure: false, // true pour 465, false pour les autres
+        auth: {
+          user: process.env.MAIL_USER || 'votre-email@gmail.com',
+          pass: process.env.MAIL_PASSWORD || 'votre-mot-de-passe-app',
+        },
+      },
+      defaults: {
+        from: '"Stock Control" <no-reply@votre-domaine.com>',
+      },
+    }),
+
+    NotificationsModule,
   ],
   providers: [
     {

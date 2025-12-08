@@ -187,6 +187,7 @@ model DetailCommande {
   produitId       Int       @map("produit_id")
   quantite        Int
   prixUnitaire    Decimal   @map("prix_unitaire") @db.Decimal(10, 2)
+  seuilAlerte     Boolean   @default(true) @map("seuil_alerte")
   
   // Relations
   commande        Commande  @relation(fields: [commandeId], references: [id], onDelete: Cascade)
