@@ -104,7 +104,7 @@ export class DashboardService {
       orderBy: { dateCommande: 'desc' },
       include: {
         client: { select: { nom: true } },
-        details: {
+        lignes: {
           include: {
             produit: { select: { nom: true } },
           },
@@ -119,7 +119,7 @@ export class DashboardService {
 
   // 1. Pour savoir ce qui se vend le mieux (vs ce qui stocke le plus)
   async getProduitsLesPlusVendus(limit: number = 5) {
-    const topVentes = await this.prisma.detailCommande.groupBy({
+    const topVentes = await this.prisma.ligneCommande.groupBy({
       by: ['produitId'],
       _sum: { quantite: true },
       orderBy: { _sum: { quantite: 'desc' } },

@@ -355,4 +355,31 @@ export class CommandesService {
       montantTotal: Number(montantTotal._sum.montantTotal || 0),
     };
   }
+
+  // Méthode update pour modifier le statut d'une commande
+  async update(id: number, updateCommandeDto: any) {
+    const commande = await this.findOne(id);
+
+    // Vérifier si la commande peut être modifiée
+    if (commande.statut === 'LIVRE') {
+      throw new BadRequestException('Impossible de modifier une commande déjà livrée');
+    }
+    if (commande.statut === 'ANNULE') {
+      throw new BadRequestException('Impossible de modifier une commande annulée');
+    }
+
+    // Mettre à jour uniquement le statut
+    return this.prisma.commande.update({
+      where: { id },
+      data: { statut: updateCommandeDto.statut },
+      include: {
+        client: true,
+        lignes: {
+          include: {
+            produit: true,
+          },
+        },
+      },
+    });
+  }
 }

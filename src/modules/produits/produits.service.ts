@@ -121,7 +121,7 @@ export class ProduitsService {
             },
           },
         },
-        detailsCommande: {
+        lignesCommande: {
           take: 5,
           orderBy: { id: 'desc' },
           include: {
