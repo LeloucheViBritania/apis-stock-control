@@ -46,6 +46,26 @@ model Utilisateur {
   bonsCommandeCrees BonCommandeAchat[] @relation("BonCommandeCreePar")
   journalAudit      JournalAudit[]
   
+  // Relations Inventaire Physique
+  inventairesPhysiquesCrees     SessionInventairePhysique[] @relation("InventaireCreePar")
+  inventairesPhysiquesValides   SessionInventairePhysique[] @relation("InventaireValidePar")
+  lignesInventaireComptees      LigneInventairePhysique[] @relation("LigneComptePar")
+  lignesInventaireRecomptees    LigneInventairePhysique[] @relation("LigneRecomptePar")
+  historiqueInventairePhysique  HistoriqueInventairePhysique[]
+
+
+  devisCrees                    Devis[] @relation("DevisCreePar")
+  historiqueDevis               HistoriqueDevis[]
+  historiqueModificationCommande HistoriqueModificationCommande[]
+
+  evaluationsFournisseur  EvaluationFournisseur[]
+  incidentsSignales       IncidentFournisseur[]
+
+  blocagesEffectues       BlocageClient[] @relation("BlocageParUtilisateur")
+  deblocagesEffectues     BlocageClient[] @relation("DeblocageParUtilisateur")
+  historiqueClient        HistoriqueClient[]
+  notesClient             NoteClient[]
+  
   @@map("utilisateurs")
 }
 
@@ -71,10 +91,14 @@ model Categorie {
   categorieParenteId  Int?      @map("categorie_parente_id")
   dateCreation        DateTime  @default(now()) @map("date_creation")
   estActif            Boolean   @default(true) @map("est_actif")
+  
   // Relations
   categorieParente    Categorie?  @relation("CategorieHierarchie", fields: [categorieParenteId], references: [id], onDelete: SetNull)
   sousCategories      Categorie[] @relation("CategorieHierarchie")
   produits            Produit[]
+  
+  // Relations Inventaire Physique
+  sessionsInventaire  SessionInventairePhysique[]
   
   @@map("categories")
 }
@@ -84,6 +108,7 @@ model Fournisseur {
   nom                 String    @db.VarChar(100)
   personneContact     String?   @map("personne_contact") @db.VarChar(100)
   email               String?   @db.VarChar(100)
+  code                String?   @unique
   telephone           String?   @db.VarChar(20)
   adresse             String?   @db.Text
   ville               String?   @db.VarChar(50)
@@ -97,6 +122,9 @@ model Fournisseur {
   // Relations
   produitsFournisseurs ProduitFournisseur[]
   bonsCommande        BonCommandeAchat[]
+  evaluations             EvaluationFournisseur[]
+  statistiques            StatistiquesFournisseur?
+  incidents               IncidentFournisseur[]
   
   @@map("fournisseurs")
 }
@@ -138,6 +166,11 @@ model Produit {
   lignesTransfert     LigneTransfertStock[]
   lignesAjustement    LigneAjustementStock[]
   
+  // Relations Inventaire Physique
+  lignesInventairePhysique LigneInventairePhysique[]
+
+    lignesDevis     LigneDevis[]
+  
   @@index([reference])
   @@index([nom])
   @@index([categorieId])
@@ -155,9 +188,26 @@ model Client {
   numeroFiscal  String?   @map("numero_fiscal") @db.VarChar(50)
   estActif      Boolean   @default(true) @map("est_actif")
   dateCreation  DateTime  @default(now()) @map("date_creation")
+
+    // Statut avancé
+  statut                  StatutClient @default(ACTIF)
+  segment                 SegmentClient @default(NOUVEAU)
+  
+  // Crédit
+  limiteCredit            Decimal   @default(0) @map("limite_credit") @db.Decimal(12, 2)
+  conditionsPaiement      String?   @map("conditions_paiement") @db.VarChar(50)  // COMPTANT, 30_JOURS, 60_JOURS
+  
+  // Relations
+  blocages                BlocageClient[]
+  encours                 EncoursClient?
+  statistiques            StatistiquesClient?
+  historique              HistoriqueClient[]
+  notes                   NoteClient[]
   
   // Relations
   commandes     Commande[]
+
+  devis           Devis[]
   
   @@map("clients")
 }
@@ -183,6 +233,13 @@ model Commande {
   entrepot        Entrepot? @relation(fields: [entrepotId], references: [id], onDelete: SetNull)
   createur        Utilisateur? @relation("CommandeCreePar", fields: [creePar], references: [id])
   lignes          LigneCommande[]
+
+  devisOrigine                  Devis?
+  commandeParente               Commande? @relation("CommandeDupliquee", fields: [commandeParenteId], references: [id])
+  commandeParenteId             Int?      @map("commande_parente_id")
+  commandesDupliquees           Commande[] @relation("CommandeDupliquee")
+  suiviLivraison                SuiviLivraison?
+  historiqueModifications       HistoriqueModificationCommande[]
   
   @@index([numeroCommande])
   @@index([statut])
@@ -238,6 +295,7 @@ enum StatutCommande {
   EXPEDIE         @map("expedie")
   LIVRE           @map("livre")
   ANNULE          @map("annule")
+  FACTUREE        @map("facturee")
 }
 
 enum TypeMouvement {
@@ -274,6 +332,11 @@ model Entrepot {
   bonsCommande    BonCommandeAchat[]
   commandes       Commande[]
   
+  // Relations Inventaire Physique
+  sessionsInventaire SessionInventairePhysique[]
+
+    devis           Devis[]
+  
   @@map("entrepots")
 }
 
@@ -291,6 +354,9 @@ model Inventaire {
   produit               Produit   @relation(fields: [produitId], references: [id], onDelete: Cascade)
   entrepot              Entrepot  @relation(fields: [entrepotId], references: [id], onDelete: Cascade)
   
+  // Relations Inventaire Physique
+  lignesInventairePhysique LigneInventairePhysique[]
+  
   @@unique([produitId, entrepotId], name: "unique_produit_entrepot")
   @@index([quantite])
   @@index([entrepotId])
@@ -307,6 +373,7 @@ model ProduitFournisseur {
   prixUnitaire            Decimal?  @map("prix_unitaire") @db.Decimal(10, 2)
   estPrefere              Boolean   @default(false) @map("est_prefere")
   dateCreation            DateTime  @default(now()) @map("date_creation")
+  referenceExterne        String?   @map("reference_externe") @db.VarChar(100)
   
   // Relations
   produit                 Produit      @relation(fields: [produitId], references: [id], onDelete: Cascade)
@@ -321,8 +388,9 @@ model BonCommandeAchat {
   numeroCommande      String    @unique @map("numero_commande") @db.VarChar(50)
   fournisseurId       Int       @map("fournisseur_id")
   entrepotId          Int       @map("entrepot_id")
-  dateCommande        DateTime  @map("date_commande") @db.Date
+  dateCommande        DateTime?  @map("date_commande") @db.Date
   dateLivraisonPrevue DateTime? @map("date_livraison_prevue") @db.Date
+  dateLivraisonReelle DateTime? @map("date_livraison_reelle") @db.Date
   statut              StatutBonCommande @default(BROUILLON)
   montantTotal        Decimal?  @map("montant_total") @db.Decimal(12, 2)
   montantTaxe         Decimal?  @map("montant_taxe") @db.Decimal(12, 2)
@@ -336,6 +404,9 @@ model BonCommandeAchat {
   entrepot            Entrepot    @relation(fields: [entrepotId], references: [id])
   createur            Utilisateur? @relation("BonCommandeCreePar", fields: [creePar], references: [id])
   lignes              LigneBonCommandeAchat[]
+
+  evaluations             EvaluationFournisseur[]
+  incidents               IncidentFournisseur[]
   
   @@index([numeroCommande])
   @@index([statut])
@@ -454,6 +525,9 @@ enum StatutBonCommande {
   APPROUVE    @map("approuve")
   RECU        @map("recu")
   ANNULE      @map("annule")
+  LIVREE      @map("livree")
+  EXPEDIEE    @map("expediee")
+  EN_PREPARATION @map("en_preparation")
 }
 
 enum StatutTransfert {
@@ -470,4 +544,713 @@ enum RaisonAjustement {
   TROUVE              @map("trouve")
   CORRECTION          @map("correction")
   AUTRE               @map("autre")
+}
+
+// ============================================
+// INVENTAIRE PHYSIQUE (PREMIUM)
+// ============================================
+
+enum StatutInventairePhysique {
+  EN_COURS        @map("en_cours")
+  EN_PAUSE        @map("en_pause")
+  TERMINE         @map("termine")
+  VALIDE          @map("valide")
+  ANNULE          @map("annule")
+}
+
+enum StatutLigneInventaire {
+  EN_ATTENTE      @map("en_attente")
+  COMPTE          @map("compte")
+  VALIDE          @map("valide")
+  ECART           @map("ecart")
+}
+
+model SessionInventairePhysique {
+  id                  Int       @id @default(autoincrement())
+  reference           String    @unique @db.VarChar(50)
+  
+  // Périmètre de l'inventaire
+  entrepotId          Int       @map("entrepot_id")
+  categorieId         Int?      @map("categorie_id")
+  zoneEmplacement     String?   @map("zone_emplacement") @db.VarChar(50)
+  
+  // Métadonnées
+  titre               String    @db.VarChar(100)
+  description         String?   @db.Text
+  statut              StatutInventairePhysique @default(EN_COURS)
+  
+  // Dates
+  dateDebut           DateTime  @default(now()) @map("date_debut")
+  dateFin             DateTime? @map("date_fin")
+  dateValidation      DateTime? @map("date_validation")
+  
+  // Statistiques (calculées)
+  totalProduits       Int       @default(0) @map("total_produits")
+  produitsComptes     Int       @default(0) @map("produits_comptes")
+  produitsAvecEcart   Int       @default(0) @map("produits_avec_ecart")
+  valeurEcartTotal    Decimal   @default(0) @map("valeur_ecart_total") @db.Decimal(12, 2)
+  
+  // Utilisateurs
+  creePar             Int       @map("cree_par")
+  validePar           Int?      @map("valide_par")
+  
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  dateModification    DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  entrepot            Entrepot  @relation(fields: [entrepotId], references: [id])
+  categorie           Categorie? @relation(fields: [categorieId], references: [id])
+  createur            Utilisateur @relation("InventaireCreePar", fields: [creePar], references: [id])
+  validateur          Utilisateur? @relation("InventaireValidePar", fields: [validePar], references: [id])
+  lignes              LigneInventairePhysique[]
+  historique          HistoriqueInventairePhysique[]
+  
+  @@index([entrepotId])
+  @@index([statut])
+  @@index([dateDebut])
+  @@map("sessions_inventaire_physique")
+}
+
+model LigneInventairePhysique {
+  id                  Int       @id @default(autoincrement())
+  sessionId           Int       @map("session_id")
+  produitId           Int       @map("produit_id")
+  inventaireId        Int?      @map("inventaire_id")
+  
+  // Emplacement
+  emplacement         String?   @db.VarChar(50)
+  
+  // Quantités
+  quantiteTheorique   Int       @map("quantite_theorique")
+  quantiteComptee     Int?      @map("quantite_comptee")
+  ecart               Int?
+  
+  // Valorisation
+  coutUnitaire        Decimal   @map("cout_unitaire") @db.Decimal(10, 2)
+  valeurEcart         Decimal?  @map("valeur_ecart") @db.Decimal(12, 2)
+  
+  // Statut et notes
+  statut              StatutLigneInventaire @default(EN_ATTENTE)
+  notes               String?   @db.Text
+  
+  // Comptage
+  comptePar           Int?      @map("compte_par")
+  dateComptage        DateTime? @map("date_comptage")
+  
+  // Recomptage (si écart important)
+  necessiteRecomptage Boolean   @default(false) @map("necessite_recomptage")
+  quantiteRecomptee   Int?      @map("quantite_recomptee")
+  recomptePar         Int?      @map("recompte_par")
+  dateRecomptage      DateTime? @map("date_recomptage")
+  
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  dateModification    DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  session             SessionInventairePhysique @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  produit             Produit   @relation(fields: [produitId], references: [id])
+  inventaire          Inventaire? @relation(fields: [inventaireId], references: [id])
+  compteur            Utilisateur? @relation("LigneComptePar", fields: [comptePar], references: [id])
+  recompteur          Utilisateur? @relation("LigneRecomptePar", fields: [recomptePar], references: [id])
+  
+  @@unique([sessionId, produitId], name: "unique_session_produit")
+  @@index([sessionId])
+  @@index([statut])
+  @@map("lignes_inventaire_physique")
+}
+
+model HistoriqueInventairePhysique {
+  id                  Int       @id @default(autoincrement())
+  sessionId           Int       @map("session_id")
+  
+  action              String    @db.VarChar(50)
+  details             Json?
+  
+  utilisateurId       Int       @map("utilisateur_id")
+  dateAction          DateTime  @default(now()) @map("date_action")
+  
+  // Relations
+  session             SessionInventairePhysique @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  utilisateur         Utilisateur @relation(fields: [utilisateurId], references: [id])
+  
+  @@index([sessionId])
+  @@index([dateAction])
+  @@map("historique_inventaire_physique")
+}
+
+
+enum StatutDevis {
+  BROUILLON       @map("brouillon")
+  ENVOYE          @map("envoye")
+  ACCEPTE         @map("accepte")
+  REFUSE          @map("refuse")
+  EXPIRE          @map("expire")
+  CONVERTI        @map("converti")
+}
+
+enum StatutSuiviLivraison {
+  EN_PREPARATION  @map("en_preparation")
+  EXPEDIE         @map("expedie")
+  EN_TRANSIT      @map("en_transit")
+  EN_LIVRAISON    @map("en_livraison")
+  LIVRE           @map("livre")
+  ECHEC_LIVRAISON @map("echec_livraison")
+  RETOURNE        @map("retourne")
+}
+
+// ============================================
+// DEVIS
+// ============================================
+
+model Devis {
+  id                  Int       @id @default(autoincrement())
+  numeroDevis         String    @unique @map("numero_devis") @db.VarChar(50)
+  
+  // Client
+  clientId            Int?      @map("client_id")
+  nomClient           String?   @map("nom_client") @db.VarChar(100)
+  emailClient         String?   @map("email_client") @db.VarChar(100)
+  telephoneClient     String?   @map("telephone_client") @db.VarChar(20)
+  adresseClient       String?   @map("adresse_client") @db.Text
+  
+  // Entrepôt (pour le stock)
+  entrepotId          Int?      @map("entrepot_id")
+  
+  // Dates
+  dateDevis           DateTime  @default(now()) @map("date_devis") @db.Date
+  dateValidite        DateTime  @map("date_validite") @db.Date
+  
+  // Statut
+  statut              StatutDevis @default(BROUILLON)
+  
+  // Montants
+  montantHT           Decimal   @default(0) @map("montant_ht") @db.Decimal(12, 2)
+  montantTaxe         Decimal   @default(0) @map("montant_taxe") @db.Decimal(12, 2)
+  montantTTC          Decimal   @default(0) @map("montant_ttc") @db.Decimal(12, 2)
+  remiseGlobale       Decimal   @default(0) @map("remise_globale") @db.Decimal(5, 2)  // Pourcentage
+  
+  // Conditions
+  conditionsPaiement  String?   @map("conditions_paiement") @db.VarChar(255)
+  delaiLivraison      String?   @map("delai_livraison") @db.VarChar(100)
+  notes               String?   @db.Text
+  notesInternes       String?   @map("notes_internes") @db.Text
+  
+  // Conversion
+  commandeId          Int?      @unique @map("commande_id")  // Si converti
+  dateConversion      DateTime? @map("date_conversion")
+  
+  // Métadonnées
+  creePar             Int?      @map("cree_par")
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  dateModification    DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  client              Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  entrepot            Entrepot? @relation(fields: [entrepotId], references: [id], onDelete: SetNull)
+  commande            Commande? @relation(fields: [commandeId], references: [id], onDelete: SetNull)
+  createur            Utilisateur? @relation("DevisCreePar", fields: [creePar], references: [id])
+  lignes              LigneDevis[]
+  historique          HistoriqueDevis[]
+  
+  @@index([numeroDevis])
+  @@index([statut])
+  @@index([clientId])
+  @@index([dateDevis])
+  @@map("devis")
+}
+
+model LigneDevis {
+  id              Int       @id @default(autoincrement())
+  devisId         Int       @map("devis_id")
+  produitId       Int       @map("produit_id")
+  
+  // Détails
+  description     String?   @db.VarChar(255)  // Description personnalisée
+  quantite        Int
+  prixUnitaire    Decimal   @map("prix_unitaire") @db.Decimal(10, 2)
+  remise          Decimal   @default(0) @db.Decimal(5, 2)  // Pourcentage par ligne
+  tauxTaxe        Decimal   @default(0) @map("taux_taxe") @db.Decimal(5, 2)
+  
+  // Montants calculés
+  montantHT       Decimal   @map("montant_ht") @db.Decimal(12, 2)
+  montantTTC      Decimal   @map("montant_ttc") @db.Decimal(12, 2)
+  
+  // Ordre d'affichage
+  ordre           Int       @default(0)
+  
+  // Relations
+  devis           Devis     @relation(fields: [devisId], references: [id], onDelete: Cascade)
+  produit         Produit   @relation(fields: [produitId], references: [id])
+  
+  @@index([devisId])
+  @@map("lignes_devis")
+}
+
+model HistoriqueDevis {
+  id              Int       @id @default(autoincrement())
+  devisId         Int       @map("devis_id")
+  
+  action          String    @db.VarChar(50)
+  ancienStatut    String?   @map("ancien_statut") @db.VarChar(50)
+  nouveauStatut   String?   @map("nouveau_statut") @db.VarChar(50)
+  details         Json?
+  
+  utilisateurId   Int?      @map("utilisateur_id")
+  dateAction      DateTime  @default(now()) @map("date_action")
+  
+  // Relations
+  devis           Devis     @relation(fields: [devisId], references: [id], onDelete: Cascade)
+  utilisateur     Utilisateur? @relation(fields: [utilisateurId], references: [id])
+  
+  @@index([devisId])
+  @@map("historique_devis")
+}
+
+// ============================================
+// SUIVI DE LIVRAISON
+// ============================================
+
+model SuiviLivraison {
+  id                  Int       @id @default(autoincrement())
+  commandeId          Int       @map("commande_id")
+  
+  // Transporteur
+  transporteur        String?   @db.VarChar(100)
+  numeroSuivi         String?   @map("numero_suivi") @db.VarChar(100)
+  urlSuivi            String?   @map("url_suivi") @db.VarChar(255)
+  
+  // Adresse de livraison
+  adresseLivraison    String?   @map("adresse_livraison") @db.Text
+  villeLivraison      String?   @map("ville_livraison") @db.VarChar(100)
+  paysLivraison       String?   @map("pays_livraison") @db.VarChar(50)
+  contactLivraison    String?   @map("contact_livraison") @db.VarChar(100)
+  telephoneLivraison  String?   @map("telephone_livraison") @db.VarChar(20)
+  
+  // Statut
+  statut              StatutSuiviLivraison @default(EN_PREPARATION)
+  
+  // Dates
+  dateExpedition      DateTime? @map("date_expedition")
+  dateLivraisonPrevue DateTime? @map("date_livraison_prevue")
+  dateLivraisonReelle DateTime? @map("date_livraison_reelle")
+  
+  // Poids et colis
+  poidsTotalKg        Decimal?  @map("poids_total_kg") @db.Decimal(10, 2)
+  nombreColis         Int       @default(1) @map("nombre_colis")
+  
+  // Instructions
+  instructionsLivraison String? @map("instructions_livraison") @db.Text
+  signatureRequise    Boolean   @default(false) @map("signature_requise")
+  
+  // Métadonnées
+  dateCreation        DateTime  @default(now()) @map("date_creation")
+  dateModification    DateTime  @updatedAt @map("date_modification")
+  
+  // Relations
+  commande            Commande  @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+  evenements          EvenementLivraison[]
+  
+  @@unique([commandeId])
+  @@index([numeroSuivi])
+  @@index([statut])
+  @@map("suivi_livraison")
+}
+
+model EvenementLivraison {
+  id              Int       @id @default(autoincrement())
+  suiviId         Int       @map("suivi_id")
+  
+  statut          StatutSuiviLivraison
+  description     String    @db.VarChar(255)
+  localisation    String?   @db.VarChar(100)
+  
+  dateEvenement   DateTime  @default(now()) @map("date_evenement")
+  
+  // Relations
+  suivi           SuiviLivraison @relation(fields: [suiviId], references: [id], onDelete: Cascade)
+  
+  @@index([suiviId])
+  @@index([dateEvenement])
+  @@map("evenements_livraison")
+}
+
+// ============================================
+// HISTORIQUE DES MODIFICATIONS DE COMMANDE
+// ============================================
+
+model HistoriqueModificationCommande {
+  id              Int       @id @default(autoincrement())
+  commandeId      Int       @map("commande_id")
+  
+  typeModification String   @map("type_modification") @db.VarChar(50)  // LIGNE_AJOUTEE, LIGNE_MODIFIEE, LIGNE_SUPPRIMEE, DUPLICATION
+  
+  // Détails de la modification
+  ligneCommandeId Int?      @map("ligne_commande_id")
+  ancienneValeur  Json?     @map("ancienne_valeur")
+  nouvelleValeur  Json?     @map("nouvelle_valeur")
+  
+  raison          String?   @db.Text
+  
+  utilisateurId   Int?      @map("utilisateur_id")
+  dateModification DateTime @default(now()) @map("date_modification")
+  
+  // Relations
+  commande        Commande  @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+  utilisateur     Utilisateur? @relation(fields: [utilisateurId], references: [id])
+  
+  @@index([commandeId])
+  @@map("historique_modification_commande")
+}
+
+model EvaluationFournisseur {
+  id              Int       @id @default(autoincrement())
+  fournisseurId   Int       @map("fournisseur_id")
+  
+  // Référence à la commande évaluée (optionnel)
+  bonCommandeId   Int?      @map("bon_commande_id")
+  
+  // Notes sur 5
+  noteQualite     Decimal   @map("note_qualite") @db.Decimal(2, 1)      // Qualité des produits
+  noteDelai       Decimal   @map("note_delai") @db.Decimal(2, 1)        // Respect des délais
+  notePrix        Decimal   @map("note_prix") @db.Decimal(2, 1)         // Compétitivité prix
+  noteCommunication Decimal @map("note_communication") @db.Decimal(2, 1) // Réactivité
+  noteConformite  Decimal   @map("note_conformite") @db.Decimal(2, 1)   // Conformité commande
+  
+  // Note globale calculée
+  noteGlobale     Decimal   @map("note_globale") @db.Decimal(2, 1)
+  
+  // Commentaire
+  commentaire     String?   @db.Text
+  pointsForts     String?   @map("points_forts") @db.Text
+  pointsAmeliorer String?   @map("points_ameliorer") @db.Text
+  
+  // Recommandation
+  recommande      Boolean   @default(true)
+  
+  // Métadonnées
+  evaluePar       Int?      @map("evalue_par")
+  dateEvaluation  DateTime  @default(now()) @map("date_evaluation")
+  
+  // Relations
+  fournisseur     Fournisseur @relation(fields: [fournisseurId], references: [id], onDelete: Cascade)
+  bonCommande     BonCommandeAchat? @relation(fields: [bonCommandeId], references: [id], onDelete: SetNull)
+  evaluateur      Utilisateur? @relation(fields: [evaluePar], references: [id])
+  
+  @@index([fournisseurId])
+  @@index([dateEvaluation])
+  @@index([noteGlobale])
+  @@map("evaluations_fournisseur")
+}
+
+// ============================================
+// STATISTIQUES FOURNISSEUR (Table de cache)
+// ============================================
+
+model StatistiquesFournisseur {
+  id                      Int       @id @default(autoincrement())
+  fournisseurId           Int       @unique @map("fournisseur_id")
+  
+  // Moyennes des notes
+  moyenneQualite          Decimal   @default(0) @map("moyenne_qualite") @db.Decimal(3, 2)
+  moyenneDelai            Decimal   @default(0) @map("moyenne_delai") @db.Decimal(3, 2)
+  moyennePrix             Decimal   @default(0) @map("moyenne_prix") @db.Decimal(3, 2)
+  moyenneCommunication    Decimal   @default(0) @map("moyenne_communication") @db.Decimal(3, 2)
+  moyenneConformite       Decimal   @default(0) @map("moyenne_conformite") @db.Decimal(3, 2)
+  moyenneGlobale          Decimal   @default(0) @map("moyenne_globale") @db.Decimal(3, 2)
+  
+  // Compteurs
+  nombreEvaluations       Int       @default(0) @map("nombre_evaluations")
+  nombreRecommandations   Int       @default(0) @map("nombre_recommandations")
+  
+  // Statistiques commandes
+  nombreCommandesTotal    Int       @default(0) @map("nombre_commandes_total")
+  nombreCommandesLivrees  Int       @default(0) @map("nombre_commandes_livrees")
+  nombreCommandesEnRetard Int       @default(0) @map("nombre_commandes_en_retard")
+  montantTotalCommandes   Decimal   @default(0) @map("montant_total_commandes") @db.Decimal(15, 2)
+  
+  // Délais moyens
+  delaiLivraisonMoyen     Decimal   @default(0) @map("delai_livraison_moyen") @db.Decimal(5, 1)  // En jours
+  tauxRespectDelai        Decimal   @default(0) @map("taux_respect_delai") @db.Decimal(5, 2)    // En %
+  
+  // Qualité
+  tauxConformite          Decimal   @default(0) @map("taux_conformite") @db.Decimal(5, 2)       // En %
+  nombreLitiges           Int       @default(0) @map("nombre_litiges")
+  
+  // Classement
+  rang                    Int?      // Position par rapport aux autres fournisseurs
+  categorie               String?   @db.VarChar(20)  // A, B, C, D (classification ABC)
+  
+  // Mise à jour
+  derniereMiseAJour       DateTime  @default(now()) @updatedAt @map("derniere_mise_a_jour")
+  
+  // Relations
+  fournisseur             Fournisseur @relation(fields: [fournisseurId], references: [id], onDelete: Cascade)
+  
+  @@map("statistiques_fournisseur")
+}
+
+// ============================================
+// INCIDENT FOURNISSEUR
+// ============================================
+
+model IncidentFournisseur {
+  id              Int       @id @default(autoincrement())
+  fournisseurId   Int       @map("fournisseur_id")
+  bonCommandeId   Int?      @map("bon_commande_id")
+  
+  // Type d'incident
+  typeIncident    String    @map("type_incident") @db.VarChar(50)
+  // RETARD, NON_CONFORMITE, PRODUIT_DEFECTUEUX, QUANTITE_INCORRECTE, 
+  // DOCUMENTATION_MANQUANTE, PRIX_DIFFERENT, AUTRE
+  
+  // Description
+  description     String    @db.Text
+  
+  // Impact
+  impact          String    @db.VarChar(20)  // FAIBLE, MOYEN, ELEVE, CRITIQUE
+  montantImpact   Decimal?  @map("montant_impact") @db.Decimal(12, 2)
+  
+  // Résolution
+  statut          String    @default("OUVERT") @db.VarChar(20)  // OUVERT, EN_COURS, RESOLU, FERME
+  resolution      String?   @db.Text
+  dateResolution  DateTime? @map("date_resolution")
+  
+  // Métadonnées
+  signalePar      Int?      @map("signale_par")
+  dateIncident    DateTime  @default(now()) @map("date_incident")
+  
+  // Relations
+  fournisseur     Fournisseur @relation(fields: [fournisseurId], references: [id], onDelete: Cascade)
+  bonCommande     BonCommandeAchat? @relation(fields: [bonCommandeId], references: [id], onDelete: SetNull)
+  utilisateur     Utilisateur? @relation(fields: [signalePar], references: [id])
+  
+  @@index([fournisseurId])
+  @@index([statut])
+  @@map("incidents_fournisseur")
+}
+
+
+enum StatutClient {
+  ACTIF             @map("actif")
+  INACTIF           @map("inactif")
+  BLOQUE            @map("bloque")
+  SUSPENDU          @map("suspendu")
+  VIP               @map("vip")
+}
+
+enum SegmentClient {
+  NOUVEAU           @map("nouveau")        // < 3 mois
+  OCCASIONNEL       @map("occasionnel")    // 1-2 commandes/an
+  REGULIER          @map("regulier")       // 3-6 commandes/an
+  FIDELE            @map("fidele")         // 7-12 commandes/an
+  VIP               @map("vip")            // > 12 commandes/an ou CA élevé
+  INACTIF           @map("inactif")        // Pas de commande depuis 6 mois
+  A_RISQUE          @map("a_risque")       // Retards de paiement
+}
+
+enum TypeEvenementClient {
+  CREATION          @map("creation")
+  MODIFICATION      @map("modification")
+  BLOCAGE           @map("blocage")
+  DEBLOCAGE         @map("deblocage")
+  COMMANDE          @map("commande")
+  PAIEMENT          @map("paiement")
+  RETARD_PAIEMENT   @map("retard_paiement")
+  LITIGE            @map("litige")
+  NOTE_AJOUTEE      @map("note_ajoutee")
+  SEGMENT_CHANGE    @map("segment_change")
+}
+
+// ============================================
+// BLOCAGE CLIENT
+// ============================================
+
+model BlocageClient {
+  id              Int       @id @default(autoincrement())
+  clientId        Int       @map("client_id")
+  
+  // Raison du blocage
+  raison          String    @db.VarChar(50)  // IMPAYE, LITIGE, FRAUDE, INACTIF, AUTRE
+  description     String    @db.Text
+  
+  // Montant impayé (si applicable)
+  montantImpaye   Decimal?  @map("montant_impaye") @db.Decimal(12, 2)
+  
+  // Dates
+  dateDebut       DateTime  @default(now()) @map("date_debut")
+  dateFin         DateTime? @map("date_fin")
+  
+  // Statut
+  estActif        Boolean   @default(true) @map("est_actif")
+  
+  // Utilisateurs
+  bloquePar       Int       @map("bloque_par")
+  debloquePar     Int?      @map("debloque_par")
+  
+  // Notes
+  notesDeblocage  String?   @map("notes_deblocage") @db.Text
+  
+  // Relations
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  utilisateurBlocage   Utilisateur @relation("BlocageParUtilisateur", fields: [bloquePar], references: [id])
+  utilisateurDeblocage Utilisateur? @relation("DeblocageParUtilisateur", fields: [debloquePar], references: [id])
+  
+  @@index([clientId])
+  @@index([estActif])
+  @@map("blocages_client")
+}
+
+// ============================================
+// ENCOURS CLIENT
+// ============================================
+
+model EncoursClient {
+  id                    Int       @id @default(autoincrement())
+  clientId              Int       @unique @map("client_id")
+  
+  // Limites
+  limiteCredit          Decimal   @default(0) @map("limite_credit") @db.Decimal(12, 2)
+  
+  // Soldes calculés
+  montantFactureTotal   Decimal   @default(0) @map("montant_facture_total") @db.Decimal(12, 2)
+  montantPaye           Decimal   @default(0) @map("montant_paye") @db.Decimal(12, 2)
+  soldeActuel           Decimal   @default(0) @map("solde_actuel") @db.Decimal(12, 2)  // Montant dû
+  
+  // Analyse des impayés
+  montantEchu           Decimal   @default(0) @map("montant_echu") @db.Decimal(12, 2)      // En retard
+  montantNonEchu        Decimal   @default(0) @map("montant_non_echu") @db.Decimal(12, 2)  // Pas encore dû
+  
+  // Détail par ancienneté
+  echu0_30Jours         Decimal   @default(0) @map("echu_0_30_jours") @db.Decimal(12, 2)
+  echu31_60Jours        Decimal   @default(0) @map("echu_31_60_jours") @db.Decimal(12, 2)
+  echu61_90Jours        Decimal   @default(0) @map("echu_61_90_jours") @db.Decimal(12, 2)
+  echuPlus90Jours       Decimal   @default(0) @map("echu_plus_90_jours") @db.Decimal(12, 2)
+  
+  // Indicateurs
+  creditDisponible      Decimal   @default(0) @map("credit_disponible") @db.Decimal(12, 2)
+  tauxUtilisationCredit Decimal   @default(0) @map("taux_utilisation_credit") @db.Decimal(5, 2)
+  scoreCredit           Int       @default(100) @map("score_credit")  // 0-100
+  
+  // Dernière mise à jour
+  derniereMiseAJour     DateTime  @default(now()) @updatedAt @map("derniere_mise_a_jour")
+  
+  // Relations
+  client                Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@map("encours_client")
+}
+
+// ============================================
+// STATISTIQUES CLIENT (Cache)
+// ============================================
+
+model StatistiquesClient {
+  id                      Int       @id @default(autoincrement())
+  clientId                Int       @unique @map("client_id")
+  
+  // Commandes
+  nombreCommandesTotal    Int       @default(0) @map("nombre_commandes_total")
+  nombreCommandesAnnee    Int       @default(0) @map("nombre_commandes_annee")
+  nombreCommandesMois     Int       @default(0) @map("nombre_commandes_mois")
+  
+  // Chiffre d'affaires
+  caTotal                 Decimal   @default(0) @map("ca_total") @db.Decimal(15, 2)
+  caAnnee                 Decimal   @default(0) @map("ca_annee") @db.Decimal(15, 2)
+  caMois                  Decimal   @default(0) @map("ca_mois") @db.Decimal(15, 2)
+  
+  // Moyennes
+  panierMoyen             Decimal   @default(0) @map("panier_moyen") @db.Decimal(12, 2)
+  frequenceAchat          Decimal   @default(0) @map("frequence_achat") @db.Decimal(5, 2)  // Commandes/mois
+  
+  // Dates clés
+  datePremiereCommande    DateTime? @map("date_premiere_commande")
+  dateDerniereCommande    DateTime? @map("date_derniere_commande")
+  joursDepuisDernierAchat Int       @default(0) @map("jours_depuis_dernier_achat")
+  
+  // Paiements
+  delaiPaiementMoyen      Decimal   @default(0) @map("delai_paiement_moyen") @db.Decimal(5, 1)  // Jours
+  nombreRetardsPaiement   Int       @default(0) @map("nombre_retards_paiement")
+  tauxPaiementATemps      Decimal   @default(100) @map("taux_paiement_a_temps") @db.Decimal(5, 2)
+  
+  // Segmentation
+  segment                 SegmentClient @default(NOUVEAU)
+  valeurClient            Decimal   @default(0) @map("valeur_client") @db.Decimal(15, 2)  // Lifetime value
+  potentielCroissance     String?   @map("potentiel_croissance") @db.VarChar(20)  // FAIBLE, MOYEN, ELEVE
+  
+  // Produits
+  nombreProduitsAchetes   Int       @default(0) @map("nombre_produits_achetes")
+  categoriePreferee       String?   @map("categorie_preferee") @db.VarChar(100)
+  
+  // Mise à jour
+  derniereMiseAJour       DateTime  @default(now()) @updatedAt @map("derniere_mise_a_jour")
+  
+  // Relations
+  client                  Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  @@map("statistiques_client")
+}
+
+// ============================================
+// HISTORIQUE ÉVÉNEMENTS CLIENT
+// ============================================
+
+model HistoriqueClient {
+  id              Int       @id @default(autoincrement())
+  clientId        Int       @map("client_id")
+  
+  typeEvenement   TypeEvenementClient @map("type_evenement")
+  description     String    @db.VarChar(255)
+  details         Json?
+  
+  // Référence (commande, facture, etc.)
+  referenceType   String?   @map("reference_type") @db.VarChar(50)
+  referenceId     Int?      @map("reference_id")
+  
+  // Montant (si applicable)
+  montant         Decimal?  @db.Decimal(12, 2)
+  
+  utilisateurId   Int?      @map("utilisateur_id")
+  dateEvenement   DateTime  @default(now()) @map("date_evenement")
+  
+  // Relations
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  utilisateur     Utilisateur? @relation(fields: [utilisateurId], references: [id])
+  
+  @@index([clientId])
+  @@index([typeEvenement])
+  @@index([dateEvenement])
+  @@map("historique_client")
+}
+
+// ============================================
+// NOTE CLIENT
+// ============================================
+
+model NoteClient {
+  id              Int       @id @default(autoincrement())
+  clientId        Int       @map("client_id")
+  
+  titre           String    @db.VarChar(100)
+  contenu         String    @db.Text
+  
+  // Priorité/Type
+  priorite        String    @default("NORMALE") @db.VarChar(20)  // BASSE, NORMALE, HAUTE, URGENTE
+  categorie       String?   @db.VarChar(50)  // COMMERCIAL, COMPTABILITE, TECHNIQUE, AUTRE
+  
+  // Rappel
+  dateRappel      DateTime? @map("date_rappel")
+  rappelEffectue  Boolean   @default(false) @map("rappel_effectue")
+  
+  // Métadonnées
+  creePar         Int       @map("cree_par")
+  dateCreation    DateTime  @default(now()) @map("date_creation")
+  dateModification DateTime @updatedAt @map("date_modification")
+  
+  // Relations
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createur        Utilisateur @relation(fields: [creePar], references: [id])
+  
+  @@index([clientId])
+  @@index([dateRappel])
+  @@map("notes_client")
 }

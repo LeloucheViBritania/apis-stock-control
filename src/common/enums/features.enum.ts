@@ -8,6 +8,11 @@ export enum Feature {
   GESTION_COMMANDES = 'gestion_commandes',
   MOUVEMENTS_STOCK_BASIQUE = 'mouvements_stock_basique',
   ALERTES_STOCK = 'alertes_stock',
+
+  INVENTAIRE_PHYSIQUE = 'inventaire_physique',
+  PREVISIONS_STOCK = 'previsions_stock',
+  REAPPROVISIONNEMENT_SUGGERE = 'reapprovisionnement_suggere',
+  REAPPROVISIONNEMENT_AUTO = 'reapprovisionnement_auto',
   
   // PREMIUM Features
   MULTI_ENTREPOTS = 'multi_entrepots',

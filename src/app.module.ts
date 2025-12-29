@@ -1,3 +1,4 @@
+
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -5,6 +6,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 // Modules Core
 import { PrismaModule } from './prisma/prisma.module';
+import { ExportModule } from './common/services/export.module'; // NOUVEAU
 
 // Modules Auth & Subscription
 import { AuthModule } from './modules/auth/auth.module';
@@ -23,21 +25,23 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { EntrepotsModule } from './modules/entrepots/entrepots.module';
 import { InventaireModule } from './modules/inventaire/inventaire.module';
 import { TransfertsStockModule } from './modules/transferts-stock/transferts-stock.module';
-// import { AjustementsStockModule } from './modules/ajustements-stock/ajustements-stock.module';
-// import { BonsCommandeAchatModule } from './modules/bons-commande-achat/bons-commande-achat.module';
- import { JournalAuditModule } from './modules/journal-audit/journal-audit.module';
-// import { RapportsModule } from './modules/rapports/rapports.module';
+import { JournalAuditModule } from './modules/journal-audit/journal-audit.module';
+import { RapportsModule } from './modules/rapports/rapports.module'; // ACTIVÉ
 
 // Guards & Interceptors
 import { AuthGuard } from './common/guards/auth.guard';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
-// 1. IMPORTER LE MODULE ET LE GUARD THROTTLER
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { MailerModule } from '@nestjs-modules/mailer';
-import { NotificationsModule } from './modules/notifications/notifications.module'; // On va le créer après
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { InventairePhysiqueModule } from './modules/inventaire-physique/inventaire-physique.module';
+import { PrevisionsModule } from './modules/previsions/previsions.module';
+import { ReapprovisionnementModule } from './modules/reapprovisionnement/reapprovisionnement.module';
+import { CommandesAvanceesModule } from './modules/commandes/commandes-avancees.module';
+import { FournisseursAvancesModule } from './modules/fournisseurs/fournisseurs-avances.module';
+import { ClientsAvancesModule } from './modules/clients/clients-avances.module';
 
 @Module({
   imports: [
@@ -47,11 +51,10 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
       envFilePath: '.env',
     }),
 
-    // 2. CONFIGURER LE THROTTLER GLOBALEMENT
-    // Ici : limite à 10 requêtes toutes les 60 secondes (1 minute)
+    // Throttler
     ThrottlerModule.forRoot([{
-      ttl: 60000, // Temps en millisecondes (60s)
-      limit: 10,  // Nombre maximum de requêtes par IP durant ce laps de temps
+      ttl: 60000,
+      limit: 10,
     }]),
 
     // JWT Configuration
@@ -64,39 +67,42 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     // Prisma (Database)
     PrismaModule,
 
+    // Module d'export global (NOUVEAU)
+    ExportModule,
+
     // Auth & Subscription
     AuthModule,
     SubscriptionModule,
 
-    // Modules FREE (toujours disponibles)
+    // Modules FREE
     ProduitsModule,
     CategoriesModule,
     FournisseursModule,
     ClientsModule,
+    ClientsAvancesModule,
     CommandesModule,
     MouvementsStockModule,
     DashboardModule,
 
-    // Modules PREMIUM (nécessitent un abonnement)
+    // Modules PREMIUM
     EntrepotsModule,
-    // Décommentez pour activer les autres modules PREMIUM
-     InventaireModule,
-     TransfertsStockModule,
-    // AjustementsStockModule,
-    // BonsCommandeAchatModule,
-     JournalAuditModule,
-    // RapportsModule,
+    InventaireModule,
+    InventairePhysiqueModule,
+    ReapprovisionnementModule,
+    CommandesAvanceesModule,
+    FournisseursAvancesModule,
+    PrevisionsModule,
+    TransfertsStockModule,
+    JournalAuditModule,
+    RapportsModule, // ACTIVÉ pour les exports
 
-
-    // 1. Activer le Scheduler
+    // Scheduler & Mailer
     ScheduleModule.forRoot(),
-
-    // 2. Configurer le Mailer (Exemple avec Gmail ou SMTP classique)
     MailerModule.forRoot({
       transport: {
         host: process.env.MAIL_HOST || 'smtp.gmail.com',
         port: Number(process.env.MAIL_PORT) || 587,
-        secure: false, // true pour 465, false pour les autres
+        secure: false,
         auth: {
           user: process.env.MAIL_USER || 'votre-email@gmail.com',
           pass: process.env.MAIL_PASSWORD || 'votre-mot-de-passe-app',
@@ -114,7 +120,6 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
-    // Interceptor global pour l'audit log (PREMIUM uniquement)
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditLogInterceptor,

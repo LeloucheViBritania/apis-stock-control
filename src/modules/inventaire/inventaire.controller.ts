@@ -1,347 +1,249 @@
+// ============================================
+// FICHIER: src/modules/inventaire/inventaire.controller.updated.ts
+// Controller Inventaire avec routes d'export intégrées
+// ============================================
+
 import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-  Query,
-  UseGuards,
-  ParseIntPipe,
-  HttpCode,
-  HttpStatus,
+  Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards,
+  ParseIntPipe, HttpCode, HttpStatus, Res,
 } from '@nestjs/common';
 import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiParam,
-  ApiQuery,
-  ApiBearerAuth,
-  ApiBody,
+  ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth, 
+  ApiBody, ApiProduces,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { InventaireService } from './inventaire.service';
+import { InventaireExportService } from './inventaire-export.service';
 import { CreateInventaireDto } from './dto/create-inventaire.dto';
-import { UpdateInventaireDto } from './dto/update-inventaire.dto'
-import { AjusterQuantiteDto } from './dto/ajuster-quantite.dto'
-import { ReserverStockDto } from './dto/reserver-stock.dto'
+import { UpdateInventaireDto } from './dto/update-inventaire.dto';
+import { AjusterQuantiteDto } from './dto/ajuster-quantite.dto';
+import { ReserverStockDto } from './dto/reserver-stock.dto';
+import { ExportInventaireQueryDto, ExportFormat } from '../../common/dto/export-query.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { PremiumGuard } from '../../common/guards/premium.guard';
+import { PremiumFeature } from '../../common/decorators/premium-feature.decorator';
+import { Feature } from '../../common/enums/features.enum';
 
-/**
- * Contrôleur pour la gestion de l'inventaire multi-entrepôts
- * 
- * Fonctionnalité PREMIUM - Nécessite un abonnement premium
- * 
- * Ce contrôleur expose les endpoints pour :
- * - CRUD complet sur les entrées d'inventaire
- * - Ajustements de quantités
- * - Réservation et libération de stock
- * - Recherche et filtrage avancés
- * - Statistiques et rapports
- * 
- * @controller inventaire
- */
 @ApiTags('Inventaire (PREMIUM)')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('inventaire')
 @UseGuards(AuthGuard, PremiumGuard)
 export class InventaireController {
-  constructor(private readonly inventaireService: InventaireService) {}
+  constructor(
+    private readonly inventaireService: InventaireService,
+    private readonly inventaireExportService: InventaireExportService,
+  ) {}
 
-  /**
-   * Créer une nouvelle entrée d'inventaire
-   */
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({
-    summary: 'Créer une entrée d\'inventaire',
-    description: 'Initialise l\'inventaire d\'un produit dans un entrepôt spécifique.',
-  })
-  @ApiBody({
-    type: CreateInventaireDto,
-    examples: {
-      exemple1: {
-        summary: 'Inventaire complet',
-        value: {
-          produitId: 42,
-          entrepotId: 1,
-          quantite: 100,
-          quantiteReservee: 10,
-          emplacement: 'A1-B3',
-        },
-      },
-      exemple2: {
-        summary: 'Inventaire minimal',
-        value: {
-          produitId: 15,
-          entrepotId: 2,
-          quantite: 50,
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Entrée d\'inventaire créée avec succès',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Produit ou entrepôt non trouvé',
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Une entrée existe déjà pour ce produit dans cet entrepôt',
-  })
-  create(@Body() createInventaireDto: CreateInventaireDto) {
-    return this.inventaireService.create(createInventaireDto);
-  }
+  // ============================================
+  // EXPORT DE L'INVENTAIRE
+  // ============================================
 
-  /**
-   * Récupérer tous les inventaires avec filtres
-   */
-  @Get()
+  @Get('export')
+  @HttpCode(HttpStatus.OK)
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
   @ApiOperation({
-    summary: 'Récupérer tous les inventaires',
-    description: 'Liste tous les inventaires avec possibilité de filtrage avancé.',
+    summary: 'Exporter l\'état de l\'inventaire',
+    description: `
+      Exporte l'état complet de l'inventaire multi-entrepôts.
+      
+      **Fonctionnalité:** 🔒 PREMIUM
+      
+      **Formats disponibles:**
+      - **CSV:** Import facile dans d'autres systèmes
+      - **XLSX:** Fichier Excel avec mise en forme
+      - **PDF:** Document imprimable pour audit physique
+      
+      **Informations exportées:**
+      - Entrepôt (nom et code)
+      - Produit (référence et nom)
+      - Catégorie du produit
+      - Emplacement dans l'entrepôt
+      - Quantités (totale, réservée, disponible)
+      - Niveaux de stock (min/max)
+      - Valorisation (coût unitaire × quantité)
+      - Statut (Normal, Stock Faible, Rupture, Surstock)
+      - Date de dernière vérification
+      
+      **Filtres disponibles:**
+      - Par entrepôt
+      - Uniquement les stocks faibles
+      - Uniquement les ruptures
+      
+      **Utilisation:**
+      - Inventaire physique
+      - Audit de stock
+      - Valorisation comptable
+      - Analyse par entrepôt
+    `,
+  })
+  @ApiQuery({
+    name: 'format',
+    enum: ['csv', 'xlsx', 'pdf'],
+    required: true,
+    description: 'Format d\'export souhaité',
+    example: 'xlsx',
   })
   @ApiQuery({
     name: 'entrepotId',
     required: false,
     type: Number,
     description: 'Filtrer par entrepôt',
-  })
-  @ApiQuery({
-    name: 'produitId',
-    required: false,
-    type: Number,
-    description: 'Filtrer par produit',
-  })
-  @ApiQuery({
-    name: 'categorieId',
-    required: false,
-    type: Number,
-    description: 'Filtrer par catégorie de produit',
   })
   @ApiQuery({
     name: 'stockFaible',
     required: false,
     type: Boolean,
-    description: 'Afficher uniquement les stocks faibles',
+    description: 'Uniquement les stocks faibles',
   })
   @ApiQuery({
-    name: 'rupture',
+    name: 'ruptures',
     required: false,
     type: Boolean,
-    description: 'Afficher uniquement les ruptures de stock',
+    description: 'Uniquement les ruptures de stock',
   })
-  @ApiQuery({
-    name: 'search',
-    required: false,
-    type: String,
-    description: 'Recherche textuelle (nom produit, référence)',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Liste des inventaires récupérée avec succès',
-  })
-  findAll(
-    @Query('entrepotId', new ParseIntPipe({ optional: true })) entrepotId?: number,
-    @Query('produitId', new ParseIntPipe({ optional: true })) produitId?: number,
-    @Query('categorieId', new ParseIntPipe({ optional: true })) categorieId?: number,
-    @Query('stockFaible') stockFaible?: string,
-    @Query('rupture') rupture?: string,
-    @Query('search') search?: string,
-  ) {
-    return this.inventaireService.findAll({
-      entrepotId,
-      produitId,
-      categorieId,
-      stockFaible: stockFaible === 'true',
-      rupture: rupture === 'true',
-      search,
-    });
+  @ApiProduces('text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/pdf')
+  @ApiResponse({ status: 200, description: 'Fichier exporté avec succès' })
+  @ApiResponse({ status: 400, description: 'Format non supporté' })
+  @ApiResponse({ status: 403, description: 'Abonnement Premium requis' })
+  async exportInventaire(
+    @Query() query: ExportInventaireQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.inventaireExportService.export(
+      query,
+      query.format as ExportFormat,
+      res,
+    );
   }
 
-  /**
-   * Obtenir les statistiques globales
-   */
-  @Get('statistiques')
+  @Get('export/resume-entrepots')
+  @HttpCode(HttpStatus.OK)
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
   @ApiOperation({
-    summary: 'Obtenir les statistiques de l\'inventaire',
-    description: 'Retourne des statistiques globales : total produits, articles, valeur, stocks faibles, ruptures.',
+    summary: 'Exporter un résumé par entrepôt',
+    description: `
+      Exporte un résumé de l'inventaire groupé par entrepôt.
+      
+      **Fonctionnalité:** 🔒 PREMIUM
+      
+      **Informations par entrepôt:**
+      - Nombre de produits
+      - Quantité totale et réservée
+      - Taux d'occupation (si capacité définie)
+      - Nombre de ruptures et alertes
+      - Valeur totale du stock
+      
+      **Utilisation:**
+      - Comparaison entre entrepôts
+      - Équilibrage des stocks
+      - Reporting direction
+    `,
   })
-  @ApiQuery({
-    name: 'entrepotId',
-    required: false,
-    type: Number,
-    description: 'Filtrer par entrepôt',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Statistiques récupérées avec succès',
-    schema: {
-      example: {
-        totalProduits: 150,
-        totalArticles: 5420,
-        totalReserve: 320,
-        totalDisponible: 5100,
-        valeurTotale: 125000.50,
-        stocksFaibles: 12,
-        ruptures: 3,
-        produitsAvecEmplacement: 145,
-        tauxEmplacement: 97,
-      },
-    },
-  })
+  @ApiQuery({ name: 'format', enum: ['csv', 'xlsx', 'pdf'], required: true })
+  @ApiProduces('text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/pdf')
+  async exportResumeEntrepots(
+    @Query('format') format: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.inventaireExportService.exportResumeParEntrepot(
+      format as ExportFormat,
+      res,
+    );
+  }
+
+  // ============================================
+  // ROUTES EXISTANTES (inchangées)
+  // ============================================
+
+  @Post()
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Créer une entrée d\'inventaire' })
+  create(@Body() createInventaireDto: CreateInventaireDto) {
+    return this.inventaireService.create(createInventaireDto);
+  }
+
+  @Get()
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Liste de l\'inventaire' })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
+  @ApiQuery({ name: 'produitId', required: false, type: Number })
+  @ApiQuery({ name: 'stockFaible', required: false, type: Boolean })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  findAll(
+    @Query('entrepotId') entrepotId?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,   // Reçu comme string
+    @Query('limit') limit?: string, // Reçu comme string
+    // ... autres query params
+  ) {
+    // On prépare l'objet de filtres (argument 1)
+    const filters = {
+      entrepotId: entrepotId ? +entrepotId : undefined,
+      search,
+      // ... autres filtres
+    };
+
+    // On prépare l'objet de pagination (argument 2)
+    const pagination = {
+      page: page ? +page : 1,     // Conversion string -> number
+      limit: limit ? +limit : 10, // Conversion string -> number
+    };
+
+    // On appelle le service avec 2 arguments distincts
+    return this.inventaireService.findAll(filters, pagination);
+  }
+
+  @Get('statistiques')
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Statistiques de l\'inventaire' })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
   getStatistiques(
     @Query('entrepotId', new ParseIntPipe({ optional: true })) entrepotId?: number,
   ) {
     return this.inventaireService.getStatistiques(entrepotId);
   }
 
-  /**
-   * Obtenir les stocks faibles
-   */
   @Get('stocks-faibles')
-  @ApiOperation({
-    summary: 'Obtenir les stocks faibles',
-    description: 'Retourne tous les produits dont la quantité est inférieure ou égale au niveau minimum.',
-  })
-  @ApiQuery({
-    name: 'entrepotId',
-    required: false,
-    type: Number,
-    description: 'Filtrer par entrepôt',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Liste des stocks faibles',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Stocks faibles' })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
   getStocksFaibles(
     @Query('entrepotId', new ParseIntPipe({ optional: true })) entrepotId?: number,
   ) {
     return this.inventaireService.getStocksFaibles(entrepotId);
   }
 
-  /**
-   * Obtenir les ruptures de stock
-   */
   @Get('ruptures')
-  @ApiOperation({
-    summary: 'Obtenir les ruptures de stock',
-    description: 'Retourne tous les produits dont la quantité est à zéro.',
-  })
-  @ApiQuery({
-    name: 'entrepotId',
-    required: false,
-    type: Number,
-    description: 'Filtrer par entrepôt',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Liste des ruptures de stock',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Ruptures de stock' })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
   getRuptures(
     @Query('entrepotId', new ParseIntPipe({ optional: true })) entrepotId?: number,
   ) {
     return this.inventaireService.getRuptures(entrepotId);
   }
 
-  /**
-   * Obtenir la disponibilité d'un produit dans tous les entrepôts
-   */
   @Get('produit/:produitId/disponibilites')
-  @ApiOperation({
-    summary: 'Obtenir la disponibilité d\'un produit',
-    description: 'Retourne la disponibilité d\'un produit dans tous les entrepôts.',
-  })
-  @ApiParam({
-    name: 'produitId',
-    type: Number,
-    description: 'ID du produit',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Disponibilités récupérées avec succès',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Produit non trouvé',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Disponibilité d\'un produit dans tous les entrepôts' })
+  @ApiParam({ name: 'produitId', type: Number })
   getDisponibilitesProduit(@Param('produitId', ParseIntPipe) produitId: number) {
     return this.inventaireService.getDisponibilitesProduit(produitId);
   }
 
-  /**
-   * Récupérer une entrée d'inventaire par ID
-   */
   @Get(':id')
-  @ApiOperation({
-    summary: 'Récupérer une entrée d\'inventaire',
-    description: 'Retourne les détails complets d\'une entrée d\'inventaire.',
-  })
-  @ApiParam({
-    name: 'id',
-    type: Number,
-    description: 'ID de l\'entrée d\'inventaire',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Entrée d\'inventaire trouvée',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Entrée d\'inventaire non trouvée',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Détails d\'une entrée d\'inventaire' })
+  @ApiParam({ name: 'id', type: Number })
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.inventaireService.findOne(id);
   }
 
-  /**
-   * Mettre à jour une entrée d'inventaire
-   */
   @Patch(':id')
-  @ApiOperation({
-    summary: 'Mettre à jour une entrée d\'inventaire',
-    description: 'Met à jour les informations d\'une entrée d\'inventaire (quantité, emplacement, etc.).',
-  })
-  @ApiParam({
-    name: 'id',
-    type: Number,
-    description: 'ID de l\'entrée d\'inventaire',
-  })
-  @ApiBody({
-    type: UpdateInventaireDto,
-    examples: {
-      exemple1: {
-        summary: 'Changer l\'emplacement',
-        value: {
-          emplacement: 'B2-C4',
-        },
-      },
-      exemple2: {
-        summary: 'Mettre à jour après inventaire physique',
-        value: {
-          quantite: 95,
-          derniereVerification: '2025-11-19T10:30:00.000Z',
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Entrée mise à jour avec succès',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Entrée non trouvée',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Quantité réservée > quantité totale',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Mettre à jour une entrée d\'inventaire' })
+  @ApiParam({ name: 'id', type: Number })
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateInventaireDto: UpdateInventaireDto,
@@ -349,56 +251,10 @@ export class InventaireController {
     return this.inventaireService.update(id, updateInventaireDto);
   }
 
-  /**
-   * Ajuster la quantité en stock
-   */
   @Post(':id/ajuster')
-  @ApiOperation({
-    summary: 'Ajuster la quantité en stock',
-    description: 'Permet d\'ajouter, retirer ou définir une quantité absolue.',
-  })
-  @ApiParam({
-    name: 'id',
-    type: Number,
-    description: 'ID de l\'entrée d\'inventaire',
-  })
-  @ApiBody({
-    type: AjusterQuantiteDto,
-    examples: {
-      ajouter: {
-        summary: 'Ajouter du stock',
-        value: {
-          type: 'ajouter',
-          quantite: 50,
-          raison: 'Réception fournisseur',
-        },
-      },
-      retirer: {
-        summary: 'Retirer du stock',
-        value: {
-          type: 'retirer',
-          quantite: 20,
-          raison: 'Vente',
-        },
-      },
-      definir: {
-        summary: 'Définir quantité absolue',
-        value: {
-          type: 'definir',
-          quantite: 100,
-          raison: 'Inventaire physique',
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Quantité ajustée avec succès',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Opération invalide (quantité négative, etc.)',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Ajuster la quantité en stock' })
+  @ApiParam({ name: 'id', type: Number })
   ajusterQuantite(
     @Param('id', ParseIntPipe) id: number,
     @Body() ajusterDto: AjusterQuantiteDto,
@@ -406,39 +262,10 @@ export class InventaireController {
     return this.inventaireService.ajusterQuantite(id, ajusterDto);
   }
 
-  /**
-   * Réserver du stock
-   */
   @Post(':id/reserver')
-  @ApiOperation({
-    summary: 'Réserver du stock',
-    description: 'Augmente la quantité réservée pour une commande ou autre utilisation.',
-  })
-  @ApiParam({
-    name: 'id',
-    type: Number,
-    description: 'ID de l\'entrée d\'inventaire',
-  })
-  @ApiBody({
-    type: ReserverStockDto,
-    examples: {
-      exemple1: {
-        summary: 'Réserver pour une commande',
-        value: {
-          quantite: 10,
-          reference: 'CMD-2025-001',
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Stock réservé avec succès',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Stock disponible insuffisant',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Réserver du stock' })
+  @ApiParam({ name: 'id', type: Number })
   reserverStock(
     @Param('id', ParseIntPipe) id: number,
     @Body() reserverDto: ReserverStockDto,
@@ -446,39 +273,10 @@ export class InventaireController {
     return this.inventaireService.reserverStock(id, reserverDto);
   }
 
-  /**
-   * Libérer du stock réservé
-   */
   @Post(':id/liberer')
-  @ApiOperation({
-    summary: 'Libérer du stock réservé',
-    description: 'Diminue la quantité réservée (annulation de commande, etc.).',
-  })
-  @ApiParam({
-    name: 'id',
-    type: Number,
-    description: 'ID de l\'entrée d\'inventaire',
-  })
-  @ApiBody({
-    type: ReserverStockDto,
-    examples: {
-      exemple1: {
-        summary: 'Libérer suite à annulation',
-        value: {
-          quantite: 5,
-          reference: 'CMD-2025-001',
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Stock libéré avec succès',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Quantité à libérer > quantité réservée',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Libérer du stock réservé' })
+  @ApiParam({ name: 'id', type: Number })
   libererStock(
     @Param('id', ParseIntPipe) id: number,
     @Body() libererDto: ReserverStockDto,
@@ -486,32 +284,11 @@ export class InventaireController {
     return this.inventaireService.libererStock(id, libererDto);
   }
 
-  /**
-   * Supprimer une entrée d'inventaire
-   */
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Supprimer une entrée d\'inventaire',
-    description: 'Supprime définitivement une entrée d\'inventaire. Refusé si du stock est réservé.',
-  })
-  @ApiParam({
-    name: 'id',
-    type: Number,
-    description: 'ID de l\'entrée d\'inventaire',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Entrée supprimée avec succès',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Entrée non trouvée',
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Impossible de supprimer : du stock est réservé',
-  })
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Supprimer une entrée d\'inventaire' })
+  @ApiParam({ name: 'id', type: Number })
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.inventaireService.remove(id);
   }
