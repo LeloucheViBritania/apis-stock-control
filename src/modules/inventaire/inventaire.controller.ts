@@ -292,4 +292,81 @@ export class InventaireController {
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.inventaireService.remove(id);
   }
+
+  // === ROUTES SUPPLÉMENTAIRES ===
+
+  @Get('stock-faible')
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Alias pour stocks-faibles (compatibilité frontend)' })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
+  @ApiQuery({ name: 'categorieId', required: false, type: Number })
+  getStockFaibleAlias(
+    @Query('entrepotId') entrepotId?: string,
+    @Query('categorieId') categorieId?: string,
+  ) {
+    return this.inventaireService.getStocksFaibles({
+      entrepotId: entrepotId ? +entrepotId : undefined,
+      categorieId: categorieId ? +categorieId : undefined,
+    });
+  }
+
+  @Get('a-commander')
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Produits à commander (sous le seuil de commande)' })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
+  getACommander(@Query('entrepotId') entrepotId?: string) {
+    return this.inventaireService.getACommander(entrepotId ? +entrepotId : undefined);
+  }
+
+  @Get('valeur')
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Valeur totale de l\'inventaire' })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
+  @ApiQuery({ name: 'categorieId', required: false, type: Number })
+  getValeur(
+    @Query('entrepotId') entrepotId?: string,
+    @Query('categorieId') categorieId?: string,
+  ) {
+    return this.inventaireService.getValeur({
+      entrepotId: entrepotId ? +entrepotId : undefined,
+      categorieId: categorieId ? +categorieId : undefined,
+    });
+  }
+
+  @Get('produit/:produitId')
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Inventaire d\'un produit dans tous les entrepôts' })
+  @ApiParam({ name: 'produitId', type: Number })
+  getByProduit(@Param('produitId', ParseIntPipe) produitId: number) {
+    return this.inventaireService.getByProduit(produitId);
+  }
+
+  @Get('entrepot/:entrepotId')
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Inventaire d\'un entrepôt' })
+  @ApiParam({ name: 'entrepotId', type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getByEntrepot(
+    @Param('entrepotId', ParseIntPipe) entrepotId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.inventaireService.findAll(
+      { entrepotId },
+      { page: page ? +page : undefined, limit: limit ? +limit : undefined }
+    );
+  }
+
+  @Patch(':id/emplacement')
+  @PremiumFeature(Feature.MULTI_ENTREPOTS)
+  @ApiOperation({ summary: 'Modifier l\'emplacement d\'un inventaire' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiBody({ schema: { properties: { emplacement: { type: 'string' } } } })
+  changeEmplacement(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('emplacement') emplacement: string,
+  ) {
+    return this.inventaireService.update(id, { emplacement });
+  }
 }

@@ -10,8 +10,26 @@ export class FournisseursService {
   async create(createFournisseurDto: CreateFournisseurDto) {
     await this.checkExisting(createFournisseurDto.nom, createFournisseurDto.email);
 
+    // Mapper les champs avec leurs alias
+    const data: any = {
+      nom: createFournisseurDto.nom,
+      email: createFournisseurDto.email || null,
+      telephone: createFournisseurDto.telephone,
+      adresse: createFournisseurDto.adresse,
+      ville: createFournisseurDto.ville,
+      pays: createFournisseurDto.pays,
+      numeroFiscal: createFournisseurDto.numeroFiscal || createFournisseurDto.siret,
+      conditionsPaiement: createFournisseurDto.conditionsPaiement,
+      estActif: createFournisseurDto.estActif ?? true,
+      // Utiliser contactPrincipal comme alias pour personneContact
+      personneContact: createFournisseurDto.personneContact || createFournisseurDto.contactPrincipal,
+    };
+
+    // Filtrer les valeurs undefined
+    Object.keys(data).forEach(key => data[key] === undefined && delete data[key]);
+
     return this.prisma.fournisseur.create({
-      data: createFournisseurDto,
+      data,
     });
   }
 

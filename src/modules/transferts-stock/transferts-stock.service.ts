@@ -55,7 +55,20 @@ export class TransfertsStockService {
    * ```
    */
   async createTransfert(createDto: CreateTransfertStockDto, userId: number) {
-    const { entrepotSourceId, entrepotDestinationId, dateTransfert, notes, lignes } = createDto;
+    // Utiliser les alias si nécessaire
+    const entrepotSourceId = createDto.entrepotSourceId || createDto.entrepotOrigineId;
+    const entrepotDestinationId = createDto.entrepotDestinationId;
+    const lignes = createDto.lignes || createDto.produits || [];
+    const dateTransfert = createDto.dateTransfert || new Date().toISOString();
+    const notes = createDto.notes;
+
+    if (!entrepotSourceId || !entrepotDestinationId) {
+      throw new BadRequestException('Les entrepôts source et destination sont requis');
+    }
+
+    if (!lignes || lignes.length === 0) {
+      throw new BadRequestException('Au moins un produit est requis');
+    }
 
     // 1. Validation : source ≠ destination
     if (entrepotSourceId === entrepotDestinationId) {
@@ -799,5 +812,235 @@ export class TransfertsStockService {
       completes,
       annules,
     };
+  }
+
+  // ==========================================
+  // MÉTHODES SUPPLÉMENTAIRES FRONTEND
+  // ==========================================
+
+  /**
+   * Obtenir les transferts en transit
+   */
+  async getEnTransit() {
+    return this.prisma.transfertStock.findMany({
+      where: { statut: 'EN_TRANSIT' },
+      include: {
+        entrepotSource: { select: { id: true, nom: true, code: true } },
+        entrepotDestination: { select: { id: true, nom: true, code: true } },
+        lignes: {
+          include: {
+            produit: { select: { id: true, nom: true, reference: true } },
+          },
+        },
+      },
+      orderBy: { dateTransfert: 'asc' },
+    });
+  }
+
+  /**
+   * Obtenir les transferts récents
+   */
+  async getRecent(limit: number = 10) {
+    return this.prisma.transfertStock.findMany({
+      include: {
+        entrepotSource: { select: { id: true, nom: true, code: true } },
+        entrepotDestination: { select: { id: true, nom: true, code: true } },
+        _count: { select: { lignes: true } },
+      },
+      orderBy: { dateCreation: 'desc' },
+      take: limit,
+    });
+  }
+
+  /**
+   * Obtenir les transferts en attente pour un entrepôt
+   */
+  async getPending(entrepotId: number, type: string = 'destination') {
+    const where: any = { statut: { in: ['EN_ATTENTE', 'EN_TRANSIT'] } };
+    
+    if (type === 'source') {
+      where.entrepotSourceId = entrepotId;
+    } else {
+      where.entrepotDestinationId = entrepotId;
+    }
+
+    return this.prisma.transfertStock.findMany({
+      where,
+      include: {
+        entrepotSource: { select: { id: true, nom: true, code: true } },
+        entrepotDestination: { select: { id: true, nom: true, code: true } },
+        lignes: {
+          include: {
+            produit: { select: { id: true, nom: true, reference: true } },
+          },
+        },
+      },
+      orderBy: { dateTransfert: 'asc' },
+    });
+  }
+
+  /**
+   * Exporter les transferts
+   */
+  async export(filters: { dateDebut?: string; dateFin?: string; statut?: string }, format: string, res: any) {
+    const where: any = {};
+
+    if (filters.statut) {
+      where.statut = filters.statut;
+    }
+
+    if (filters.dateDebut || filters.dateFin) {
+      where.dateTransfert = {};
+      if (filters.dateDebut) where.dateTransfert.gte = new Date(filters.dateDebut);
+      if (filters.dateFin) where.dateTransfert.lte = new Date(filters.dateFin);
+    }
+
+    const transferts = await this.prisma.transfertStock.findMany({
+      where,
+      include: {
+        entrepotSource: { select: { nom: true, code: true } },
+        entrepotDestination: { select: { nom: true, code: true } },
+        lignes: { include: { produit: { select: { reference: true, nom: true } } } },
+      },
+      orderBy: { dateTransfert: 'desc' },
+    });
+
+    // Générer CSV
+    if (format === 'csv') {
+      const csvContent = this.generateCSV(transferts);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=transferts.csv');
+      return res.send(csvContent);
+    }
+
+    // Par défaut, retourner les données
+    return { data: transferts, count: transferts.length };
+  }
+
+  private generateCSV(transferts: any[]): string {
+    const headers = ['Numéro', 'Source', 'Destination', 'Date', 'Statut', 'Nb Lignes'];
+    const rows = transferts.map(t => [
+      t.numeroTransfert,
+      t.entrepotSource?.nom || '',
+      t.entrepotDestination?.nom || '',
+      t.dateTransfert?.toISOString().split('T')[0] || '',
+      t.statut,
+      t.lignes?.length || 0,
+    ].join(';'));
+    return [headers.join(';'), ...rows].join('\n');
+  }
+
+  /**
+   * Ajouter une ligne à un transfert
+   */
+  async ajouterLigne(transfertId: number, ligne: { produitId: number; quantite: number }) {
+    const transfert = await this.findOne(transfertId);
+
+    if (transfert.statut !== 'EN_ATTENTE') {
+      throw new BadRequestException('Impossible d\'ajouter une ligne à un transfert qui n\'est pas en attente');
+    }
+
+    // Vérifier que le produit existe
+    const produit = await this.prisma.produit.findUnique({
+      where: { id: ligne.produitId },
+    });
+
+    if (!produit) {
+      throw new NotFoundException(`Produit #${ligne.produitId} non trouvé`);
+    }
+
+    // Vérifier que le produit n'est pas déjà dans le transfert
+    const existante = transfert.lignes.find(l => l.produitId === ligne.produitId);
+    if (existante) {
+      throw new BadRequestException(`Le produit ${produit.reference} est déjà dans ce transfert`);
+    }
+
+    return this.prisma.ligneTransfertStock.create({
+      data: {
+        transfertId,
+        produitId: ligne.produitId,
+        quantite: ligne.quantite,
+        quantiteRecue: 0,
+      },
+      include: {
+        produit: { select: { id: true, nom: true, reference: true } },
+      },
+    });
+  }
+
+  /**
+   * Modifier une ligne d'un transfert
+   */
+  async modifierLigne(transfertId: number, ligneId: number, data: { quantite?: number }) {
+    const transfert = await this.findOne(transfertId);
+
+    if (transfert.statut !== 'EN_ATTENTE') {
+      throw new BadRequestException('Impossible de modifier une ligne d\'un transfert qui n\'est pas en attente');
+    }
+
+    const ligne = transfert.lignes.find(l => l.id === ligneId);
+    if (!ligne) {
+      throw new NotFoundException(`Ligne #${ligneId} non trouvée dans ce transfert`);
+    }
+
+    return this.prisma.ligneTransfertStock.update({
+      where: { id: ligneId },
+      data: {
+        quantite: data.quantite,
+      },
+      include: {
+        produit: { select: { id: true, nom: true, reference: true } },
+      },
+    });
+  }
+
+  /**
+   * Supprimer une ligne d'un transfert
+   */
+  async supprimerLigne(transfertId: number, ligneId: number) {
+    const transfert = await this.findOne(transfertId);
+
+    if (transfert.statut !== 'EN_ATTENTE') {
+      throw new BadRequestException('Impossible de supprimer une ligne d\'un transfert qui n\'est pas en attente');
+    }
+
+    const ligne = transfert.lignes.find(l => l.id === ligneId);
+    if (!ligne) {
+      throw new NotFoundException(`Ligne #${ligneId} non trouvée dans ce transfert`);
+    }
+
+    // Vérifier qu'il reste au moins une ligne
+    if (transfert.lignes.length <= 1) {
+      throw new BadRequestException('Un transfert doit avoir au moins une ligne');
+    }
+
+    await this.prisma.ligneTransfertStock.delete({
+      where: { id: ligneId },
+    });
+
+    return { success: true, message: 'Ligne supprimée' };
+  }
+
+  /**
+   * Générer document PDF
+   */
+  async genererDocument(transfertId: number, res: any) {
+    const transfert = await this.findOne(transfertId);
+
+    // Retourner les données pour génération côté client ou service PDF
+    const documentData = {
+      transfert,
+      titre: `Bon de Transfert ${transfert.numeroTransfert}`,
+      dateGeneration: new Date().toISOString(),
+      lignes: transfert.lignes.map(l => ({
+        reference: l.produit.reference,
+        nom: l.produit.nom,
+        quantite: l.quantite,
+        quantiteRecue: l.quantiteRecue,
+      })),
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    return res.json(documentData);
   }
 }

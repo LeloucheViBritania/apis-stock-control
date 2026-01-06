@@ -644,4 +644,14 @@ export class ProduitsService {
       },
     });
   }
+
+  /**
+   * Importer des produits depuis un fichier
+   * Note: Cette méthode délègue au ProduitsImportService
+   */
+  async import(formData: any, userId?: number) {
+    // Cette méthode est un placeholder - l'import réel est géré par ProduitsImportService
+    // via le controller qui injecte le service d'import directement
+    throw new Error('Utilisez ProduitsImportService pour l\'import de fichiers');
+  }
 }

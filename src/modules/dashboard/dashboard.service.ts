@@ -113,6 +113,31 @@ export class DashboardService {
     });
   }
 
+  async getMouvementsRecents(limit: number = 5) {
+    const mouvements = await this.prisma.mouvementStock.findMany({
+      take: limit,
+      orderBy: { dateMouvement: 'desc' },
+      include: {
+        produit: { select: { id: true, nom: true, reference: true } },
+        entrepot: { select: { id: true, nom: true, code: true } },
+        utilisateur: { select: { id: true, nomComplet: true } },
+      },
+    });
+
+    return mouvements.map(m => ({
+      id: m.id,
+      type: m.typeMouvement,
+      typeMouvement: m.typeMouvement,
+      quantite: m.quantite,
+      date: m.dateMouvement,
+      dateMouvement: m.dateMouvement,
+      raison: m.raison,
+      produit: m.produit,
+      entrepot: m.entrepot,
+      utilisateur: m.utilisateur,
+    }));
+  }
+
   // ==========================================
   // NOUVELLES MÉTHODES (Correctement intégrées)
   // ==========================================

@@ -181,6 +181,119 @@ export class PrevisionsService {
   }
 
   // ============================================
+  // PRODUITS À COMMANDER
+  // ============================================
+
+  async getProduitsACommander(limit: number = 20, entrepotId?: number) {
+    // Récupérer les produits avec stock faible
+    const whereClause: any = {
+      estActif: true,
+      OR: [
+        { quantiteStock: { lte: this.prisma.produit.fields.niveauStockMin } },
+        { quantiteStock: { lte: this.prisma.produit.fields.pointCommande } },
+      ],
+    };
+
+    const produits = await this.prisma.produit.findMany({
+      where: whereClause,
+      include: {
+        categorie: { select: { id: true, nom: true } },
+        produitsFournisseurs: {
+          where: { estPrefere: true },
+          take: 1,
+          include: {
+            fournisseur: {
+              select: { id: true, nom: true, email: true, telephone: true },
+            },
+          },
+        },
+        inventaire: entrepotId ? { where: { entrepotId } } : { take: 5 },
+      },
+      orderBy: { quantiteStock: 'asc' },
+      take: limit,
+    });
+
+    const result = await Promise.all(
+      produits.map(async (produit) => {
+        // Calculer le stock selon l'entrepôt
+        const stockActuel = entrepotId
+          ? produit.inventaire.reduce((sum, inv) => sum + inv.quantite, 0)
+          : produit.quantiteStock;
+
+        // Récupérer l'historique pour calculer la consommation
+        const historique = await this.getHistoriqueMouvements(
+          produit.id,
+          30,
+          entrepotId,
+        );
+
+        const donneesPrevision = this.calculerDonneesPrevision(
+          historique,
+          MethodePrevision.MOYENNE_MOBILE,
+        );
+
+        const joursAvantRupture = this.calculerJoursAvantRupture(
+          stockActuel,
+          donneesPrevision.consommationMoyenneJour,
+        );
+
+        const niveauUrgence = this.determinerNiveauUrgence(
+          stockActuel,
+          produit.niveauStockMin,
+          joursAvantRupture,
+        );
+
+        const quantiteSuggereCommande = this.calculerQuantiteSuggereCommande(
+          produit,
+          donneesPrevision,
+          30,
+        );
+
+        const fournisseurPrefere = produit.produitsFournisseurs[0]?.fournisseur || null;
+
+        return {
+          id: produit.id,
+          reference: produit.reference,
+          nom: produit.nom,
+          categorie: produit.categorie,
+          stockActuel,
+          stockMinimum: produit.niveauStockMin,
+          pointCommande: produit.pointCommande,
+          consommationMoyenneJour: Math.round(donneesPrevision.consommationMoyenneJour * 100) / 100,
+          joursAvantRupture,
+          niveauUrgence,
+          quantiteSuggereCommande,
+          coutUnitaire: Number(produit.coutUnitaire || 0),
+          coutTotalCommande: Math.round(quantiteSuggereCommande * Number(produit.coutUnitaire || 0) * 100) / 100,
+          fournisseurPrefere,
+          tendance: donneesPrevision.tendance,
+        };
+      }),
+    );
+
+    // Trier par urgence
+    result.sort((a, b) => {
+      const ordreUrgence = { CRITIQUE: 0, URGENT: 1, ATTENTION: 2, OK: 3 };
+      return ordreUrgence[a.niveauUrgence] - ordreUrgence[b.niveauUrgence];
+    });
+
+    // Résumé
+    const resume = {
+      totalProduits: result.length,
+      produitsEnRupture: result.filter((p) => p.niveauUrgence === 'CRITIQUE').length,
+      produitsUrgents: result.filter((p) => p.niveauUrgence === 'URGENT').length,
+      valeurTotaleCommandes: Math.round(
+        result.reduce((sum, p) => sum + p.coutTotalCommande, 0) * 100,
+      ) / 100,
+    };
+
+    return {
+      resume,
+      produits: result,
+    };
+  }
+
+  // ============================================
   // PRÉVISIONS GLOBALES DES COMMANDES
   // ============================================
 

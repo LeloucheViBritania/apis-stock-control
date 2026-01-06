@@ -4,8 +4,9 @@ export class CreateEntrepotDto {
   @IsString()
   nom: string;
 
+  @IsOptional()
   @IsString()
-  code: string;
+  code?: string; // Rendu optionnel - sera auto-généré si absent
 
   @IsOptional()
   @IsString()
@@ -20,6 +21,10 @@ export class CreateEntrepotDto {
   pays?: string;
 
   @IsOptional()
+  @IsString()
+  telephone?: string;
+
+  @IsOptional()
   @IsInt()
   responsableId?: number;
 
@@ -31,4 +36,8 @@ export class CreateEntrepotDto {
   @IsOptional()
   @IsBoolean()
   estActif?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  estPrincipal?: boolean;
 }

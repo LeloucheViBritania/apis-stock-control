@@ -22,7 +22,7 @@ import {
   StatutClient,
 } from './dto/clients-avances.dto';
 
-import { StatutCommande } from '@prisma/client';
+// Note: StatutCommande is handled as string literals
 
 @Injectable()
 export class ClientsAvancesService {
@@ -119,7 +119,9 @@ export class ClientsAvancesService {
       select: { id: true, reference: true, nom: true },
     });
 
-    const produitsMap = new Map(produits.map((p) => [p.id, p]));
+    const produitsMap = new Map<number, { id: number; reference: string; nom: string }>(
+      produits.map((p) => [p.id, p])
+    );
 
     // Récupérer les stats du client
     const stats = await this.prisma.statistiquesClient.findUnique({
@@ -210,7 +212,7 @@ async getSoldeClient(clientId: number) {
     const dernieresCommandes = await this.prisma.commande.findMany({
       where: { 
         clientId, 
-        statut: StatutCommande.LIVRE // Utilisation stricte de l'Enum
+        statut: 'LIVRE'
       },
       orderBy: { dateCommande: 'desc' },
       take: 5,
@@ -975,7 +977,9 @@ async getSoldeClient(clientId: number) {
       select: { id: true, reference: true, nom: true, prixVente: true },
     });
 
-    const produitsMap = new Map(produits.map((p) => [p.id, p]));
+    const produitsMap = new Map<number, { id: number; reference: string; nom: string; prixVente: any }>(
+      produits.map((p) => [p.id, p])
+    );
 
     return result.map((r) => {
       const produit = produitsMap.get(r.produitId);

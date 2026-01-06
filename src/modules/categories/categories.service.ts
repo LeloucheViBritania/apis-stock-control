@@ -11,10 +11,13 @@ export class CategoriesService {
     // Vérifier si la categorie existe déjà
     await this.checkExisting(createCategoryDto.nom);
 
+    // Utiliser parentId comme alias si categorieParenteId n'est pas fourni
+    const categorieParenteId = createCategoryDto.categorieParenteId || createCategoryDto.parentId;
+
     // Vérifier que la catégorie parente existe si spécifiée
-    if (createCategoryDto.categorieParenteId) {
+    if (categorieParenteId) {
       const parent = await this.prisma.categorie.findUnique({
-        where: { id: createCategoryDto.categorieParenteId },
+        where: { id: categorieParenteId },
       });
 
       if (!parent) {
@@ -23,7 +26,11 @@ export class CategoriesService {
     }
 
     return this.prisma.categorie.create({
-      data: createCategoryDto,
+      data: {
+        nom: createCategoryDto.nom,
+        description: createCategoryDto.description,
+        categorieParenteId: categorieParenteId,
+      },
       include: {
         categorieParente: true,
         sousCategories: true,

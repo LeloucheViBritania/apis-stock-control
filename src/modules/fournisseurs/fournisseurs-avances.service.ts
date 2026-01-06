@@ -17,7 +17,6 @@ import {
   SignalerIncidentDto,
   CategorieFournisseur,
 } from './dto/fournisseurs-avances.dto';
-import { StatutBonCommande } from '@prisma/client';
 
 @Injectable()
 export class FournisseursAvancesService {
@@ -699,7 +698,7 @@ private async calculerEtMettreAJourStatistiques(fournisseurId: number) {
     const commandesLivrees = await this.prisma.bonCommandeAchat.count({
       where: { 
         fournisseurId, 
-        statut: StatutBonCommande.LIVREE
+        statut: 'LIVREE'
       },
     });
 

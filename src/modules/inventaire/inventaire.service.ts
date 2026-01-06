@@ -539,11 +539,19 @@ export class InventaireService {
    * const entrepot1 = await inventaireService.getStocksFaibles(1);
    * ```
    */
-  async getStocksFaibles(entrepotId?: number) {
+  async getStocksFaibles(filtersOrEntrepotId?: number | { entrepotId?: number; categorieId?: number }) {
     const where: any = {};
 
-    if (entrepotId) {
-      where.entrepotId = entrepotId;
+    // Handle both number and object parameters
+    if (typeof filtersOrEntrepotId === 'number') {
+      where.entrepotId = filtersOrEntrepotId;
+    } else if (filtersOrEntrepotId) {
+      if (filtersOrEntrepotId.entrepotId) {
+        where.entrepotId = filtersOrEntrepotId.entrepotId;
+      }
+      if (filtersOrEntrepotId.categorieId) {
+        where.produit = { categorieId: filtersOrEntrepotId.categorieId };
+      }
     }
 
     const inventaires = await this.prisma.inventaire.findMany({
@@ -724,5 +732,187 @@ export class InventaireService {
         },
       },
     });
+  }
+
+  // ==========================================
+  // MÉTHODES SUPPLÉMENTAIRES FRONTEND
+  // ==========================================
+
+  /**
+   * Obtenir les produits à commander (sous le seuil de commande)
+   */
+  async getACommander(entrepotId?: number) {
+    const where: any = {};
+
+    if (entrepotId) {
+      where.entrepotId = entrepotId;
+    }
+
+    const inventaires = await this.prisma.inventaire.findMany({
+      where,
+      include: {
+        produit: {
+          include: {
+            categorie: { select: { id: true, nom: true } },
+            produitsFournisseurs: {
+              where: { estPrefere: true },
+              include: {
+                fournisseur: { select: { id: true, nom: true } },
+              },
+              take: 1,
+            },
+          },
+        },
+        entrepot: {
+          select: { id: true, nom: true, code: true },
+        },
+      },
+    });
+
+    // Filtrer les produits sous le seuil de commande et calculer les quantités
+    return (inventaires as any[])
+      .filter(inv => inv.quantite <= inv.produit.niveauStockMin)
+      .map(inv => {
+        const quantiteACommander = Math.max(
+          0,
+          (inv.produit.niveauStockMax || inv.produit.niveauStockMin * 2) - inv.quantite
+        );
+        return {
+          ...inv,
+          quantiteACommander,
+          fournisseurPrefere: inv.produit.produitsFournisseurs[0]?.fournisseur || null,
+        };
+      })
+      .sort((a, b) => b.quantiteACommander - a.quantiteACommander);
+  }
+
+  /**
+   * Obtenir la valeur totale de l'inventaire
+   */
+  async getValeur(filters?: {
+    entrepotId?: number;
+    categorieId?: number;
+  }) {
+    const where: any = {};
+
+    if (filters?.entrepotId) {
+      where.entrepotId = filters.entrepotId;
+    }
+
+    if (filters?.categorieId) {
+      where.produit = { categorieId: filters.categorieId };
+    }
+
+    const inventaires = await this.prisma.inventaire.findMany({
+      where,
+      include: {
+        produit: {
+          select: {
+            id: true,
+            nom: true,
+            reference: true,
+            coutUnitaire: true,
+            prixVente: true,
+            categorieId: true,
+          },
+        },
+        entrepot: {
+          select: { id: true, nom: true },
+        },
+      },
+    });
+
+    const valeurCout = inventaires.reduce(
+      (sum, inv) => sum + inv.quantite * Number(inv.produit.coutUnitaire || 0),
+      0
+    );
+
+    const valeurVente = inventaires.reduce(
+      (sum, inv) => sum + inv.quantite * Number(inv.produit.prixVente || 0),
+      0
+    );
+
+    const totalArticles = inventaires.reduce((sum, inv) => sum + inv.quantite, 0);
+    const totalProduits = inventaires.length;
+
+    // Grouper par entrepôt si pas de filtre entrepot
+    let parEntrepot: any[] = [];
+    if (!filters?.entrepotId) {
+      const grouped = inventaires.reduce((acc, inv) => {
+        const entId = inv.entrepot.id;
+        if (!acc[entId]) {
+          acc[entId] = {
+            entrepot: inv.entrepot,
+            valeurCout: 0,
+            valeurVente: 0,
+            totalArticles: 0,
+            totalProduits: 0,
+          };
+        }
+        acc[entId].valeurCout += inv.quantite * Number(inv.produit.coutUnitaire || 0);
+        acc[entId].valeurVente += inv.quantite * Number(inv.produit.prixVente || 0);
+        acc[entId].totalArticles += inv.quantite;
+        acc[entId].totalProduits += 1;
+        return acc;
+      }, {} as Record<number, any>);
+      parEntrepot = Object.values(grouped);
+    }
+
+    return {
+      valeurCout,
+      valeurVente,
+      margePotentielle: valeurVente - valeurCout,
+      totalArticles,
+      totalProduits,
+      parEntrepot,
+    };
+  }
+
+  /**
+   * Obtenir l'inventaire d'un produit dans tous les entrepôts
+   */
+  async getByProduit(produitId: number) {
+    const produit = await this.prisma.produit.findUnique({
+      where: { id: produitId },
+      include: {
+        categorie: { select: { id: true, nom: true } },
+      },
+    });
+
+    if (!produit) {
+      throw new NotFoundException(`Produit #${produitId} non trouvé`);
+    }
+
+    const inventaires = await this.prisma.inventaire.findMany({
+      where: { produitId },
+      include: {
+        entrepot: {
+          select: {
+            id: true,
+            nom: true,
+            code: true,
+            ville: true,
+            estActif: true,
+          },
+        },
+      },
+      orderBy: {
+        entrepot: { nom: 'asc' },
+      },
+    });
+
+    const totalQuantite = inventaires.reduce((sum, inv) => sum + inv.quantite, 0);
+    const totalReserve = inventaires.reduce((sum, inv) => sum + inv.quantiteReservee, 0);
+
+    return {
+      produit,
+      inventaires,
+      resume: {
+        totalQuantite,
+        totalReserve,
+        totalDisponible: totalQuantite - totalReserve,
+        nombreEntrepots: inventaires.length,
+      },
+    };
   }
 }

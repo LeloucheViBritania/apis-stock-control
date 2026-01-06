@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
   Request,
+  Res,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -402,5 +403,146 @@ export class TransfertsStockController {
       req.user.id,
       raison,
     );
+  }
+
+  // ==========================================
+  // ROUTES SUPPLÉMENTAIRES FRONTEND
+  // ==========================================
+
+  /**
+   * Alias pour réceptionner (compatibilité frontend)
+   */
+  @Post(':id/recevoir')
+  @ApiOperation({ summary: 'Recevoir un transfert (alias de receptionner)' })
+  @ApiParam({ name: 'id', type: Number })
+  recevoir(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.transfertsStockService.receptionnerTransfert(id, req.user.id);
+  }
+
+  /**
+   * Annuler via POST (compatibilité frontend)
+   */
+  @Post(':id/annuler')
+  @ApiOperation({ summary: 'Annuler un transfert (POST)' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiBody({ schema: { properties: { raison: { type: 'string' } } } })
+  annulerPost(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('raison') raison: string,
+    @Request() req,
+  ) {
+    return this.transfertsStockService.annulerTransfert(id, req.user.id, raison);
+  }
+
+  /**
+   * Transferts en transit
+   */
+  @Get('en-transit')
+  @ApiOperation({ summary: 'Lister les transferts en transit' })
+  getEnTransit() {
+    return this.transfertsStockService.getEnTransit();
+  }
+
+  /**
+   * Transferts récents
+   */
+  @Get('recent')
+  @ApiOperation({ summary: 'Transferts récents' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getRecent(@Query('limit') limit?: string) {
+    return this.transfertsStockService.getRecent(limit ? +limit : 10);
+  }
+
+  /**
+   * Transferts en attente pour un entrepôt
+   */
+  @Get('pending/:entrepotId')
+  @ApiOperation({ summary: 'Transferts en attente pour un entrepôt' })
+  @ApiParam({ name: 'entrepotId', type: Number })
+  @ApiQuery({ name: 'type', enum: ['source', 'destination'], required: false })
+  getPending(
+    @Param('entrepotId', ParseIntPipe) entrepotId: number,
+    @Query('type') type: string = 'destination',
+  ) {
+    return this.transfertsStockService.getPending(entrepotId, type);
+  }
+
+  /**
+   * Exporter les transferts
+   */
+  @Get('export')
+  @ApiOperation({ summary: 'Exporter les transferts' })
+  @ApiQuery({ name: 'format', enum: ['csv', 'excel', 'pdf'], required: false })
+  @ApiQuery({ name: 'dateDebut', required: false })
+  @ApiQuery({ name: 'dateFin', required: false })
+  @ApiQuery({ name: 'statut', required: false })
+  async export(
+    @Query('format') format: string = 'excel',
+    @Query('dateDebut') dateDebut?: string,
+    @Query('dateFin') dateFin?: string,
+    @Query('statut') statut?: string,
+    @Res() res?: any,
+  ) {
+    return this.transfertsStockService.export({ dateDebut, dateFin, statut }, format, res);
+  }
+
+  /**
+   * Ajouter une ligne
+   */
+  @Post(':id/lignes')
+  @ApiOperation({ summary: 'Ajouter une ligne au transfert' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiBody({ 
+    schema: { 
+      properties: { 
+        produitId: { type: 'number' },
+        quantite: { type: 'number' }
+      } 
+    }
+  })
+  ajouterLigne(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() ligne: { produitId: number; quantite: number },
+  ) {
+    return this.transfertsStockService.ajouterLigne(id, ligne);
+  }
+
+  /**
+   * Modifier une ligne
+   */
+  @Patch(':id/lignes/:ligneId')
+  @ApiOperation({ summary: 'Modifier une ligne du transfert' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiParam({ name: 'ligneId', type: Number })
+  modifierLigne(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('ligneId', ParseIntPipe) ligneId: number,
+    @Body() data: { quantite?: number },
+  ) {
+    return this.transfertsStockService.modifierLigne(id, ligneId, data);
+  }
+
+  /**
+   * Supprimer une ligne
+   */
+  @Delete(':id/lignes/:ligneId')
+  @ApiOperation({ summary: 'Supprimer une ligne du transfert' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiParam({ name: 'ligneId', type: Number })
+  supprimerLigne(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('ligneId', ParseIntPipe) ligneId: number,
+  ) {
+    return this.transfertsStockService.supprimerLigne(id, ligneId);
+  }
+
+  /**
+   * Générer document PDF
+   */
+  @Get(':id/document')
+  @ApiOperation({ summary: 'Générer le document PDF du transfert' })
+  @ApiParam({ name: 'id', type: Number })
+  genererDocument(@Param('id', ParseIntPipe) id: number, @Res() res: any) {
+    return this.transfertsStockService.genererDocument(id, res);
   }
 }

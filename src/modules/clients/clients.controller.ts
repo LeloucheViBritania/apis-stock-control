@@ -243,12 +243,16 @@ export class ClientsController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('statut') statut?: string,
+    @Query('segment') segment?: string,
   ) {
     return this.clientsService.findAll({
       estActif: estActif ? estActif === 'true' : undefined,
       search,
       page: page ? +page : undefined,
       limit: limit ? +limit : undefined,
+      statut,
+      segment,
     });
   }
 

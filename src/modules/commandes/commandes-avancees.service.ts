@@ -426,26 +426,26 @@ export class CommandesAvanceesService {
     }
 
     // Calculer la progression
-    const progression = this.calculerProgression(suivi.statut);
+    const progression = this.calculerProgression(suivi!.statut);
 
     return {
-      id: suivi.id,
+      id: suivi!.id,
       commandeId,
       numeroCommande: commande.numeroCommande,
-      transporteur: suivi.transporteur,
-      numeroSuivi: suivi.numeroSuivi,
-      urlSuivi: suivi.urlSuivi,
-      statut: suivi.statut,
-      adresseLivraison: suivi.adresseLivraison,
-      villeLivraison: suivi.villeLivraison,
-      contactLivraison: suivi.contactLivraison,
-      telephoneLivraison: suivi.telephoneLivraison,
-      dateLivraisonPrevue: suivi.dateLivraisonPrevue,
-      dateLivraisonReelle: suivi.dateLivraisonReelle,
-      poidsTotalKg: suivi.poidsTotalKg,
-      nombreColis: suivi.nombreColis,
-      signatureRequise: suivi.signatureRequise,
-      evenements: suivi.evenements.map((e) => ({
+      transporteur: suivi!.transporteur,
+      numeroSuivi: suivi!.numeroSuivi,
+      urlSuivi: suivi!.urlSuivi,
+      statut: suivi!.statut,
+      adresseLivraison: suivi!.adresseLivraison,
+      villeLivraison: suivi!.villeLivraison,
+      contactLivraison: suivi!.contactLivraison,
+      telephoneLivraison: suivi!.telephoneLivraison,
+      dateLivraisonPrevue: suivi!.dateLivraisonPrevue,
+      dateLivraisonReelle: suivi!.dateLivraisonReelle,
+      poidsTotalKg: suivi!.poidsTotalKg,
+      nombreColis: suivi!.nombreColis,
+      signatureRequise: suivi!.signatureRequise,
+      evenements: suivi!.evenements.map((e) => ({
         statut: e.statut,
         description: e.description,
         localisation: e.localisation,
@@ -603,7 +603,7 @@ export class CommandesAvanceesService {
       throw new BadRequestException('Un ou plusieurs produits non trouvés');
     }
 
-    const produitsMap = new Map(produits.map((p) => [p.id, p]));
+    const produitsMap = new Map<number, typeof produits[0]>(produits.map((p) => [p.id, p]));
 
     // Générer le numéro de devis
     const numeroDevis = await this.genererNumeroDevis();
@@ -613,10 +613,10 @@ export class CommandesAvanceesService {
     let montantTaxe = 0;
 
     const lignesData = dto.lignes.map((ligne, index) => {
-      const produit = produitsMap.get(ligne.produitId)!;
-      const prixUnitaire = ligne.prixUnitaire ?? Number(produit.prixVente) ?? 0;
+      const produit = produitsMap.get(ligne.produitId);
+      const prixUnitaire = ligne.prixUnitaire ?? Number(produit?.prixVente || 0);
       const remise = ligne.remise || 0;
-      const tauxTaxe = Number(produit.tauxTaxe) || 0;
+      const tauxTaxe = Number(produit?.tauxTaxe || 0);
 
       const montantBrut = ligne.quantite * prixUnitaire;
       const montantRemise = montantBrut * (remise / 100);
@@ -1045,5 +1045,302 @@ export class CommandesAvanceesService {
       RETOURNE: 'Colis retourné',
     };
     return descriptions[statut] || statut;
+  }
+
+  // ============================================
+  // MÉTHODES SUPPLÉMENTAIRES FRONTEND
+  // ============================================
+
+  /**
+   * Obtenir l'historique d'une commande
+   */
+  async getHistorique(commandeId: number) {
+    const commande = await this.prisma.commande.findUnique({
+      where: { id: commandeId },
+      include: {
+        client: { select: { id: true, nom: true } },
+        createur: { select: { id: true, nomComplet: true } },
+      },
+    });
+
+    if (!commande) {
+      throw new NotFoundException(`Commande #${commandeId} non trouvée`);
+    }
+
+    // Récupérer les mouvements de stock liés à cette commande
+    const mouvements = await this.prisma.mouvementStock.findMany({
+      where: {
+        typeReference: 'commande',
+        referenceId: commandeId,
+      },
+      include: {
+        produit: { select: { id: true, nom: true, reference: true } },
+        utilisateur: { select: { id: true, nomComplet: true } },
+      },
+      orderBy: { dateMouvement: 'desc' },
+    });
+
+    // Récupérer le suivi de livraison s'il existe
+    const suivi = await this.prisma.suiviLivraison.findFirst({
+      where: { commandeId },
+      include: {
+        evenements: {
+          orderBy: { dateEvenement: 'desc' },
+        },
+      },
+    });
+
+    // Construire l'historique
+    const historique: any[] = [];
+
+    // Ajout création commande
+    historique.push({
+      type: 'CREATION',
+      date: commande.dateCreation,
+      description: `Commande créée par ${commande.createur?.nomComplet || 'Système'}`,
+      utilisateur: commande.createur,
+    });
+
+    // Ajouter les mouvements de stock
+    for (const mvt of mouvements) {
+      historique.push({
+        type: `STOCK_${mvt.typeMouvement}`,
+        date: mvt.dateMouvement,
+        description: `${mvt.typeMouvement}: ${mvt.quantite}x ${mvt.produit.nom}`,
+        utilisateur: mvt.utilisateur,
+        details: mvt,
+      });
+    }
+
+    // Ajouter les événements de livraison
+    if (suivi?.evenements) {
+      for (const evt of suivi.evenements) {
+        historique.push({
+          type: `LIVRAISON_${evt.statut}`,
+          date: evt.dateEvenement,
+          description: evt.description,
+          localisation: evt.localisation,
+        });
+      }
+    }
+
+    // Trier par date décroissante
+    historique.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return {
+      commande: {
+        id: commande.id,
+        numeroCommande: commande.numeroCommande,
+        statut: commande.statut,
+        client: commande.client,
+      },
+      historique,
+    };
+  }
+
+  /**
+   * Obtenir les commandes en attente pour un entrepôt
+   */
+  async getEnAttenteEntrepot(entrepotId: number) {
+    const entrepot = await this.prisma.entrepot.findUnique({
+      where: { id: entrepotId },
+    });
+
+    if (!entrepot) {
+      throw new NotFoundException(`Entrepôt #${entrepotId} non trouvé`);
+    }
+
+    const commandes = await this.prisma.commande.findMany({
+      where: {
+        entrepotId,
+        statut: { in: ['EN_ATTENTE', 'EN_TRAITEMENT'] },
+      },
+      include: {
+        client: { select: { id: true, nom: true, email: true } },
+        lignes: {
+          include: {
+            produit: { select: { id: true, nom: true, reference: true } },
+          },
+        },
+      },
+      orderBy: [
+        { statut: 'asc' },
+        { dateCommande: 'asc' },
+      ],
+    });
+
+    return {
+      entrepot: { id: entrepot.id, nom: entrepot.nom },
+      commandes,
+      total: commandes.length,
+    };
+  }
+
+  /**
+   * Obtenir les ventes par période
+   */
+  async getVentesPeriode(periode: string) {
+    const now = new Date();
+    let dateDebut: Date;
+    let dateFin: Date = now;
+
+    switch (periode) {
+      case 'jour':
+        dateDebut = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      case 'semaine':
+        const dayOfWeek = now.getDay();
+        dateDebut = new Date(now);
+        dateDebut.setDate(now.getDate() - dayOfWeek);
+        dateDebut.setHours(0, 0, 0, 0);
+        break;
+      case 'mois':
+        dateDebut = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      case 'trimestre':
+        const quarter = Math.floor(now.getMonth() / 3);
+        dateDebut = new Date(now.getFullYear(), quarter * 3, 1);
+        break;
+      case 'annee':
+        dateDebut = new Date(now.getFullYear(), 0, 1);
+        break;
+      default:
+        dateDebut = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+
+    const commandes = await this.prisma.commande.findMany({
+      where: {
+        dateCommande: {
+          gte: dateDebut,
+          lte: dateFin,
+        },
+        statut: { in: ['EN_TRAITEMENT', 'EXPEDIE', 'LIVRE'] },
+      },
+      include: {
+        client: { select: { id: true, nom: true } },
+        lignes: {
+          include: {
+            produit: { select: { id: true, nom: true, categorieId: true } },
+          },
+        },
+      },
+    });
+
+    // Calculs statistiques
+    const totalVentes = commandes.reduce((sum, c) => sum + Number(c.montantTotal || 0), 0);
+    const nombreCommandes = commandes.length;
+    const commandesLivrees = commandes.filter(c => c.statut === 'LIVRE').length;
+
+    // Ventes par jour
+    const ventesParJour: Record<string, { date: string; montant: number; count: number }> = {};
+    commandes.forEach(c => {
+      const dateStr = new Date(c.dateCommande).toISOString().split('T')[0];
+      if (!ventesParJour[dateStr]) {
+        ventesParJour[dateStr] = { date: dateStr, montant: 0, count: 0 };
+      }
+      ventesParJour[dateStr].montant += Number(c.montantTotal || 0);
+      ventesParJour[dateStr].count++;
+    });
+
+    // Top clients
+    const clientsMap: Record<number, { client: any; montant: number; count: number }> = {};
+    commandes.forEach((c: any) => {
+      if (c.client) {
+        if (!clientsMap[c.client.id]) {
+          clientsMap[c.client.id] = { client: c.client, montant: 0, count: 0 };
+        }
+        clientsMap[c.client.id].montant += Number(c.montantTotal || 0);
+        clientsMap[c.client.id].count++;
+      }
+    });
+    const topClients = Object.values(clientsMap)
+      .sort((a, b) => b.montant - a.montant)
+      .slice(0, 10);
+
+    return {
+      periode,
+      dateDebut,
+      dateFin,
+      statistiques: {
+        totalVentes,
+        nombreCommandes,
+        commandesLivrees,
+        panierMoyen: nombreCommandes > 0 ? totalVentes / nombreCommandes : 0,
+        tauxConversion: nombreCommandes > 0 ? (commandesLivrees / nombreCommandes) * 100 : 0,
+      },
+      ventesParJour: Object.values(ventesParJour).sort((a, b) => a.date.localeCompare(b.date)),
+      topClients,
+    };
+  }
+
+  /**
+   * Créer une commande depuis un devis
+   */
+  async creerDepuisDevis(devisId: number, userId: number) {
+    const devis = await this.prisma.devis.findUnique({
+      where: { id: devisId },
+      include: {
+        lignes: {
+          include: {
+            produit: { select: { id: true, nom: true, prixVente: true } },
+          },
+        },
+        client: true,
+      },
+    });
+
+    if (!devis) {
+      throw new NotFoundException(`Devis #${devisId} non trouvé`);
+    }
+
+    if (devis.statut === 'CONVERTI') {
+      throw new BadRequestException('Ce devis a déjà été converti en commande');
+    }
+
+    if (devis.statut === 'REFUSE' || devis.statut === 'EXPIRE') {
+      throw new BadRequestException(`Impossible de convertir un devis ${devis.statut.toLowerCase()}`);
+    }
+
+    // Vérifier la validité
+    if (devis.dateValidite && new Date(devis.dateValidite) < new Date()) {
+      throw new BadRequestException('Ce devis a expiré');
+    }
+
+    const numeroCommande = await this.genererNumeroCommande();
+
+    return this.prisma.$transaction(async (tx) => {
+      // Créer la commande
+      const commande = await tx.commande.create({
+        data: {
+          numeroCommande,
+          clientId: devis.clientId,
+          dateCommande: new Date(),
+          montantTotal: devis.montantTTC,
+          creePar: userId,
+          lignes: {
+            create: devis.lignes.map((l) => ({
+              produitId: l.produitId,
+              quantite: l.quantite,
+              prixUnitaire: l.prixUnitaire,
+            })),
+          },
+        },
+        include: {
+          client: true,
+          lignes: { include: { produit: true } },
+        },
+      });
+
+      // Mettre à jour le statut du devis
+      await tx.devis.update({
+        where: { id: devisId },
+        data: {
+          statut: 'CONVERTI',
+          commandeId: commande.id,
+        },
+      });
+
+      return commande;
+    });
   }
 }

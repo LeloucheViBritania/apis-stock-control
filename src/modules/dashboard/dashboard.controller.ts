@@ -56,6 +56,17 @@ export class DashboardController {
     return this.dashboardService.getCommandesRecentes(limit ? +limit : 5);
   }
 
+  @Get('mouvements-recents')
+  @PremiumFeature(Feature.DASHBOARD_BASIQUE)
+  @ApiOperation({ 
+    summary: 'Mouvements de stock récents',
+    description: 'Retourne les derniers mouvements de stock'
+  })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 5 })
+  getMouvementsRecents(@Query('limit') limit?: string) {
+    return this.dashboardService.getMouvementsRecents(limit ? +limit : 5);
+  }
+
   // =================================================================
   // NOUVELLES ROUTES (Business Intelligence)
   // =================================================================

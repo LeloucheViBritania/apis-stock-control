@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsBoolean, IsNumber, ValidateIf } from 'class-validator';
 
 export class CreateFournisseurDto {
   @IsString()
@@ -9,6 +9,11 @@ export class CreateFournisseurDto {
   personneContact?: string;
 
   @IsOptional()
+  @IsString()
+  contactPrincipal?: string; // Alias pour personneContact
+
+  @IsOptional()
+  @ValidateIf((o) => o.email !== '' && o.email !== null)
   @IsEmail()
   email?: string;
 
@@ -34,9 +39,21 @@ export class CreateFournisseurDto {
 
   @IsOptional()
   @IsString()
+  siret?: string;
+
+  @IsOptional()
+  @IsString()
   conditionsPaiement?: string;
 
   @IsOptional()
   @IsBoolean()
   estActif?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  delaiLivraisonMoyen?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

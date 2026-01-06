@@ -276,4 +276,59 @@ export class ProduitsController {
   ) {
     return this.produitsService.retirerFournisseur(id, fournisseurId);
   }
+
+  // === ROUTES MANQUANTES - Fournisseurs ===
+
+  @Get(':id/fournisseurs')
+  @PremiumFeature(Feature.RELATION_PRODUITS_FOURNISSEURS)
+  @ApiOperation({ summary: 'Lister les fournisseurs d\'un produit' })
+  @ApiParam({ name: 'id', type: Number })
+  getFournisseurs(@Param('id', ParseIntPipe) id: number) {
+    return this.produitsService.getFournisseurs(id);
+  }
+
+  @Post(':id/fournisseurs/:fournisseurId/prefere')
+  @PremiumFeature(Feature.RELATION_PRODUITS_FOURNISSEURS)
+  @ApiOperation({ summary: 'Définir un fournisseur comme préféré' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiParam({ name: 'fournisseurId', type: Number })
+  definirFournisseurPrefere(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('fournisseurId', ParseIntPipe) fournisseurId: number,
+  ) {
+    return this.produitsService.definirFournisseurPrefere(id, fournisseurId);
+  }
+
+  @Get(':id/fournisseur-prefere')
+  @PremiumFeature(Feature.RELATION_PRODUITS_FOURNISSEURS)
+  @ApiOperation({ summary: 'Obtenir le fournisseur préféré du produit' })
+  @ApiParam({ name: 'id', type: Number })
+  getFournisseurPrefere(@Param('id', ParseIntPipe) id: number) {
+    return this.produitsService.getFournisseurPrefere(id);
+  }
+
+  @Get(':id/meilleur-prix')
+  @PremiumFeature(Feature.RELATION_PRODUITS_FOURNISSEURS)
+  @ApiOperation({ summary: 'Obtenir le meilleur prix fournisseur' })
+  @ApiParam({ name: 'id', type: Number })
+  getMeilleurPrix(@Param('id', ParseIntPipe) id: number) {
+    return this.produitsService.getMeilleurPrix(id);
+  }
+
+  // === IMPORT ===
+
+  @Post('import')
+  @PremiumFeature(Feature.GESTION_PRODUITS)
+  @ApiOperation({ summary: 'Importer des produits depuis un fichier' })
+  @ApiBody({ 
+    schema: { 
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' }
+      }
+    }
+  })
+  import(@Body() formData: any, @Request() req) {
+    return this.produitsService.import(formData, req.user?.id);
+  }
 }

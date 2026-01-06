@@ -1,10 +1,11 @@
-import { IsString, IsEmail, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsEmail, IsOptional, IsBoolean, IsNumber, ValidateIf } from 'class-validator';
 
 export class CreateClientDto {
   @IsString()
   nom: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.email !== '' && o.email !== null)
   @IsEmail()
   email?: string;
 
@@ -31,4 +32,21 @@ export class CreateClientDto {
   @IsOptional()
   @IsBoolean()
   estActif?: boolean;
+
+  // Champs additionnels du frontend
+  @IsOptional()
+  @IsString()
+  entreprise?: string;
+
+  @IsOptional()
+  @IsString()
+  segment?: string;
+
+  @IsOptional()
+  @IsNumber()
+  limiteCredit?: number;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

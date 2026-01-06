@@ -1081,4 +1081,468 @@ export class InventairePhysiqueService {
 
     return stats;
   }
+
+  // ============================================
+  // MÉTHODES FRONTEND SUPPLÉMENTAIRES
+  // ============================================
+
+  /**
+   * Obtenir la progression d'une session
+   */
+  async getProgression(sessionId: number) {
+    const session = await this.getSessionDetails(sessionId);
+    
+    // Calculate stats from session lignes
+    const totalProduits = session.lignes?.length || 0;
+    const produitsComptes = session.lignes?.filter((l: any) => l.quantiteComptee !== null).length || 0;
+    const produitsAvecEcart = session.lignes?.filter((l: any) => l.ecart !== 0).length || 0;
+    const progression = totalProduits > 0 ? Math.round((produitsComptes / totalProduits) * 100) : 0;
+
+    return {
+      sessionId,
+      statut: session.statut,
+      progression,
+      totalProduits,
+      produitsComptes,
+      produitsAvecEcart,
+    };
+  }
+
+  /**
+   * Obtenir les sessions actives
+   */
+  async getActives() {
+    return this.prisma.sessionInventairePhysique.findMany({
+      where: {
+        statut: { in: ['EN_COURS', 'EN_PAUSE'] },
+      },
+      include: {
+        entrepot: { select: { id: true, nom: true, code: true } },
+        createur: { select: { id: true, nomComplet: true } },
+        _count: { select: { lignes: true } },
+      },
+      orderBy: { dateDebut: 'desc' },
+    });
+  }
+
+  /**
+   * Obtenir les statistiques globales (toutes sessions)
+   */
+  async getStatistiquesGlobales(filters?: { dateDebut?: string; dateFin?: string }) {
+    const where: any = {};
+    
+    if (filters?.dateDebut || filters?.dateFin) {
+      where.dateDebut = {};
+      if (filters.dateDebut) where.dateDebut.gte = new Date(filters.dateDebut);
+      if (filters.dateFin) where.dateDebut.lte = new Date(filters.dateFin);
+    }
+
+    const [total, enCours, terminees, validees, annulees] = await Promise.all([
+      this.prisma.sessionInventairePhysique.count({ where }),
+      this.prisma.sessionInventairePhysique.count({ where: { ...where, statut: 'EN_COURS' } }),
+      this.prisma.sessionInventairePhysique.count({ where: { ...where, statut: 'TERMINE' } }),
+      this.prisma.sessionInventairePhysique.count({ where: { ...where, statut: 'VALIDE' } }),
+      this.prisma.sessionInventairePhysique.count({ where: { ...where, statut: 'ANNULE' } }),
+    ]);
+
+    return {
+      total,
+      enCours,
+      terminees,
+      validees,
+      annulees,
+      tauxValidation: total > 0 ? Math.round((validees / total) * 100) : 0,
+    };
+  }
+
+  /**
+   * Générer un rapport PDF pour une session
+   */
+  async genererRapport(sessionId: number, format: string = 'pdf', res: any) {
+    const session = await this.getSessionDetails(sessionId);
+    
+    // Calculate stats from session
+    const lignes = session.lignes || [];
+    const totalProduits = lignes.length;
+    const produitsComptes = lignes.filter((l: any) => l.quantiteComptee !== null).length;
+    const produitsAvecEcart = lignes.filter((l: any) => l.ecart !== 0).length;
+
+    const rapport = {
+      session: {
+        id: session.id,
+        reference: session.reference,
+        entrepot: session.entrepot?.nom,
+        responsable: session.createur?.nomComplet,
+        dateDebut: session.dateDebut,
+        dateFin: session.dateFin,
+        statut: session.statut,
+      },
+      statistiques: {
+        totalProduits,
+        produitsComptes,
+        produitsAvecEcart,
+        progression: totalProduits > 0 ? Math.round((produitsComptes / totalProduits) * 100) : 0,
+      },
+      lignes: lignes.map((l: any) => ({
+        produit: l.produit?.nom,
+        reference: l.produit?.reference,
+        quantiteTheorique: l.quantiteTheorique,
+        quantiteComptee: l.quantiteComptee,
+        ecart: l.ecart,
+        valeurEcart: l.valeurEcart,
+      })),
+    };
+
+    if (res) {
+      res.setHeader('Content-Type', 'application/json');
+      res.json(rapport);
+    }
+    return rapport;
+  }
+
+  // ============================================
+  // MÉTHODES CRUD ADDITIONNELLES
+  // ============================================
+
+  async update(sessionId: number, updateData: any) {
+    const session = await this.prisma.sessionInventairePhysique.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} non trouvée`);
+    }
+
+    if (session.statut !== 'EN_COURS') {
+      throw new BadRequestException('Seules les sessions en cours peuvent être modifiées');
+    }
+
+    return this.prisma.sessionInventairePhysique.update({
+      where: { id: sessionId },
+      data: updateData,
+      include: {
+        entrepot: true,
+        createur: { select: { id: true, nomComplet: true, email: true } },
+      },
+    });
+  }
+
+  async remove(sessionId: number) {
+    const session = await this.prisma.sessionInventairePhysique.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} non trouvée`);
+    }
+
+    if (session.statut !== 'EN_COURS') {
+      throw new BadRequestException('Seules les sessions en cours peuvent être supprimées');
+    }
+
+    // Supprimer les lignes d'abord
+    await this.prisma.ligneInventairePhysique.deleteMany({
+      where: { sessionId },
+    });
+
+    return this.prisma.sessionInventairePhysique.delete({
+      where: { id: sessionId },
+    });
+  }
+
+  async demarrer(sessionId: number, userId: number) {
+    const session = await this.prisma.sessionInventairePhysique.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} non trouvée`);
+    }
+
+    if (session.statut !== 'EN_PAUSE') {
+      throw new BadRequestException('Seules les sessions en pause peuvent être démarrées');
+    }
+
+    return this.prisma.sessionInventairePhysique.update({
+      where: { id: sessionId },
+      data: {
+        statut: 'EN_COURS',
+        dateDebut: session.dateDebut || new Date(),
+      },
+      include: {
+        entrepot: true,
+        createur: { select: { id: true, nomComplet: true, email: true } },
+      },
+    });
+  }
+
+  async terminer(sessionId: number, userId: number) {
+    const session = await this.prisma.sessionInventairePhysique.findUnique({
+      where: { id: sessionId },
+      include: { lignes: true },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} non trouvée`);
+    }
+
+    if (session.statut !== 'EN_COURS') {
+      throw new BadRequestException('Seules les sessions en cours peuvent être terminées');
+    }
+
+    // Vérifier que tous les produits sont comptés
+    const nonComptes = session.lignes.filter((l: any) => l.quantiteComptee === null);
+    if (nonComptes.length > 0) {
+      throw new BadRequestException(`${nonComptes.length} produit(s) n'ont pas encore été comptés`);
+    }
+
+    return this.prisma.sessionInventairePhysique.update({
+      where: { id: sessionId },
+      data: {
+        statut: 'TERMINE',
+        dateFin: new Date(),
+      },
+      include: {
+        entrepot: true,
+        createur: { select: { id: true, nomComplet: true, email: true } },
+      },
+    });
+  }
+
+  async getLignes(sessionId: number, filters?: { page?: number; limit?: number; statut?: string }) {
+    const session = await this.prisma.sessionInventairePhysique.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} non trouvée`);
+    }
+
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 50;
+    const skip = (page - 1) * limit;
+
+    const where: any = { sessionId };
+
+    if (filters?.statut === 'comptes') {
+      where.quantiteComptee = { not: null };
+    } else if (filters?.statut === 'non_comptes') {
+      where.quantiteComptee = null;
+    } else if (filters?.statut === 'ecarts') {
+      where.ecart = { not: 0 };
+    }
+
+    const [lignes, total] = await Promise.all([
+      this.prisma.ligneInventairePhysique.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          produit: {
+            select: { id: true, reference: true, nom: true, coutUnitaire: true },
+          },
+        },
+        orderBy: { id: 'asc' },
+      }),
+      this.prisma.ligneInventairePhysique.count({ where }),
+    ]);
+
+    return {
+      data: lignes,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async ajouterProduit(sessionId: number, produitId: number, userId: number) {
+    const session = await this.prisma.sessionInventairePhysique.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} non trouvée`);
+    }
+
+    if (session.statut !== 'EN_COURS') {
+      throw new BadRequestException('Les produits ne peuvent être ajoutés qu\'aux sessions en cours');
+    }
+
+    // Vérifier si le produit existe déjà dans la session
+    const existing = await this.prisma.ligneInventairePhysique.findFirst({
+      where: { sessionId, produitId },
+    });
+
+    if (existing) {
+      throw new BadRequestException('Ce produit est déjà dans la session d\'inventaire');
+    }
+
+    // Récupérer le stock actuel du produit dans l'entrepôt
+    const stock = await this.prisma.inventaire.findFirst({
+      where: { produitId, entrepotId: session.entrepotId },
+    });
+
+    // Récupérer le coût unitaire du produit
+    const produit = await this.prisma.produit.findUnique({
+      where: { id: produitId },
+      select: { coutUnitaire: true },
+    });
+
+    return this.prisma.ligneInventairePhysique.create({
+      data: {
+        sessionId,
+        produitId,
+        quantiteTheorique: stock?.quantite || 0,
+        quantiteComptee: null,
+        ecart: 0,
+        valeurEcart: 0,
+        coutUnitaire: produit?.coutUnitaire || 0,
+      },
+      include: {
+        produit: {
+          select: { id: true, reference: true, nom: true, coutUnitaire: true },
+        },
+      },
+    });
+  }
+
+  async compterLigne(sessionId: number, ligneId: number, data: { quantiteComptee: number; notes?: string }, userId: number) {
+    const ligne = await this.prisma.ligneInventairePhysique.findFirst({
+      where: { id: ligneId, sessionId },
+      include: { produit: true },
+    });
+
+    if (!ligne) {
+      throw new NotFoundException(`Ligne ${ligneId} non trouvée dans la session ${sessionId}`);
+    }
+
+    const ecart = data.quantiteComptee - ligne.quantiteTheorique;
+    const valeurEcart = ecart * (Number(ligne.produit?.coutUnitaire || 0));
+
+    return this.prisma.ligneInventairePhysique.update({
+      where: { id: ligneId },
+      data: {
+        quantiteComptee: data.quantiteComptee,
+        ecart,
+        valeurEcart,
+        notes: data.notes,
+        dateComptage: new Date(),
+      },
+      include: {
+        produit: {
+          select: { id: true, reference: true, nom: true, coutUnitaire: true },
+        },
+      },
+    });
+  }
+
+  async demanderRecomptage(sessionId: number, ligneId: number, userId: number) {
+    const ligne = await this.prisma.ligneInventairePhysique.findFirst({
+      where: { id: ligneId, sessionId },
+    });
+
+    if (!ligne) {
+      throw new NotFoundException(`Ligne ${ligneId} non trouvée dans la session ${sessionId}`);
+    }
+
+    return this.prisma.ligneInventairePhysique.update({
+      where: { id: ligneId },
+      data: {
+        necessiteRecomptage: true,
+        quantiteComptee: null,
+        ecart: 0,
+        valeurEcart: 0,
+      },
+      include: {
+        produit: {
+          select: { id: true, reference: true, nom: true, coutUnitaire: true },
+        },
+      },
+    });
+  }
+
+  async recompterLigne(sessionId: number, ligneId: number, data: { quantiteComptee: number; notes?: string }, userId: number) {
+    const ligne = await this.prisma.ligneInventairePhysique.findFirst({
+      where: { id: ligneId, sessionId },
+      include: { produit: true },
+    });
+
+    if (!ligne) {
+      throw new NotFoundException(`Ligne ${ligneId} non trouvée dans la session ${sessionId}`);
+    }
+
+    const ecart = data.quantiteComptee - ligne.quantiteTheorique;
+    const valeurEcart = ecart * (Number(ligne.produit?.coutUnitaire || 0));
+
+    return this.prisma.ligneInventairePhysique.update({
+      where: { id: ligneId },
+      data: {
+        quantiteComptee: data.quantiteComptee,
+        ecart,
+        valeurEcart,
+        notes: data.notes,
+        necessiteRecomptage: false,
+        dateRecomptage: new Date(),
+      },
+      include: {
+        produit: {
+          select: { id: true, reference: true, nom: true, coutUnitaire: true },
+        },
+      },
+    });
+  }
+
+  async getResume(sessionId: number) {
+    const session = await this.prisma.sessionInventairePhysique.findUnique({
+      where: { id: sessionId },
+      include: {
+        entrepot: true,
+        createur: { select: { id: true, nomComplet: true, email: true } },
+        lignes: {
+          include: {
+            produit: { select: { id: true, reference: true, nom: true, coutUnitaire: true } },
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} non trouvée`);
+    }
+
+    const totalProduits = session.lignes.length;
+    const produitsComptes = session.lignes.filter((l: any) => l.quantiteComptee !== null).length;
+    const produitsAvecEcart = session.lignes.filter((l: any) => l.ecart !== 0).length;
+    const valeurTotaleEcarts = session.lignes.reduce((sum: number, l: any) => sum + Math.abs(l.valeurEcart || 0), 0);
+    const ecartsPositifs = session.lignes.filter((l: any) => l.ecart > 0).length;
+    const ecartsNegatifs = session.lignes.filter((l: any) => l.ecart < 0).length;
+    const recomptagesRequis = session.lignes.filter((l: any) => l.necessiteRecomptage).length;
+
+    return {
+      session: {
+        id: session.id,
+        reference: session.reference,
+        statut: session.statut,
+        dateDebut: session.dateDebut,
+        dateFin: session.dateFin,
+        entrepot: session.entrepot?.nom,
+        responsable: session.createur?.nomComplet,
+      },
+      progression: {
+        totalProduits,
+        produitsComptes,
+        pourcentage: totalProduits > 0 ? Math.round((produitsComptes / totalProduits) * 100) : 0,
+      },
+      ecarts: {
+        total: produitsAvecEcart,
+        positifs: ecartsPositifs,
+        negatifs: ecartsNegatifs,
+        valeurTotale: valeurTotaleEcarts,
+      },
+      recomptages: {
+        requis: recomptagesRequis,
+      },
+    };
+  }
 }

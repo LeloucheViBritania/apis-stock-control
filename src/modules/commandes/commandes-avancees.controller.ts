@@ -417,4 +417,48 @@ export class DevisController {
       raison,
     );
   }
+
+  // ============================================
+  // ROUTES FRONTEND SUPPLÉMENTAIRES
+  // ============================================
+
+  @Get(':id/historique')
+  @Roles(Role.ADMIN, Role.GESTIONNAIRE, Role.EMPLOYE)
+  @ApiOperation({ summary: 'Historique des modifications d\'une commande' })
+  @ApiParam({ name: 'id', description: 'ID de la commande' })
+  @ApiResponse({ status: 200, description: 'Historique récupéré' })
+  async getHistorique(@Param('id', ParseIntPipe) id: number) {
+    return this.commandesAvanceesService.getHistorique(id);
+  }
+
+  @Get('en-attente/entrepot/:entrepotId')
+  @Roles(Role.ADMIN, Role.GESTIONNAIRE)
+  @ApiOperation({ summary: 'Commandes en attente pour un entrepôt' })
+  @ApiParam({ name: 'entrepotId', description: 'ID de l\'entrepôt' })
+  @ApiResponse({ status: 200, description: 'Liste des commandes en attente' })
+  async getEnAttenteEntrepot(@Param('entrepotId', ParseIntPipe) entrepotId: number) {
+    return this.commandesAvanceesService.getEnAttenteEntrepot(entrepotId);
+  }
+
+  @Get('ventes/:periode')
+  @Roles(Role.ADMIN, Role.GESTIONNAIRE)
+  @ApiOperation({ summary: 'Statistiques de ventes par période' })
+  @ApiParam({ name: 'periode', description: 'Période (jour, semaine, mois, annee)' })
+  @ApiResponse({ status: 200, description: 'Statistiques récupérées' })
+  async getVentesPeriode(@Param('periode') periode: string) {
+    return this.commandesAvanceesService.getVentesPeriode(periode);
+  }
+
+  @Post('depuis-devis/:devisId')
+  @HttpCode(HttpStatus.CREATED)
+  @Roles(Role.ADMIN, Role.GESTIONNAIRE)
+  @ApiOperation({ summary: 'Créer une commande depuis un devis' })
+  @ApiParam({ name: 'devisId', description: 'ID du devis' })
+  @ApiResponse({ status: 201, description: 'Commande créée' })
+  async creerDepuisDevis(
+    @Param('devisId', ParseIntPipe) devisId: number,
+    @Request() req: any,
+  ) {
+    return this.commandesAvanceesService.creerDepuisDevis(devisId, req.user.id);
+  }
 }

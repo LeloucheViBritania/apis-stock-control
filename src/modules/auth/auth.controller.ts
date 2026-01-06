@@ -12,6 +12,7 @@ import {
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/password.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
 
 @ApiTags('Auth')
@@ -297,5 +298,114 @@ export class AuthController {
       authenticated: true,
       user: req.user,
     };
+  }
+
+  // ==========================================
+  // GESTION DES MOTS DE PASSE
+  // ==========================================
+
+  @Post('forgot-password')
+  @ApiOperation({ 
+    summary: 'Demander la réinitialisation du mot de passe',
+    description: `
+      Envoie un email avec un lien de réinitialisation du mot de passe.
+      
+      **Note:** Pour des raisons de sécurité, la réponse est toujours positive 
+      même si l'email n'existe pas dans le système.
+    `
+  })
+  @ApiBody({ type: ForgotPasswordDto })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Email de réinitialisation envoyé (si l\'adresse existe)',
+    schema: {
+      example: {
+        message: 'Si cette adresse email existe dans notre système, un email de réinitialisation a été envoyé.'
+      }
+    }
+  })
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(forgotPasswordDto.email);
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ 
+    summary: 'Réinitialiser le mot de passe avec un token',
+    description: `
+      Réinitialise le mot de passe en utilisant le token reçu par email.
+      
+      **Le token:**
+      - Est valide pendant 1 heure
+      - Ne peut être utilisé qu'une seule fois
+      - Est lié à un utilisateur spécifique
+    `
+  })
+  @ApiBody({ type: ResetPasswordDto })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Mot de passe réinitialisé avec succès',
+    schema: {
+      example: {
+        message: 'Mot de passe réinitialisé avec succès'
+      }
+    }
+  })
+  @ApiBadRequestResponse({
+    description: 'Token invalide ou expiré',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Token invalide ou expiré',
+        error: 'Bad Request'
+      }
+    }
+  })
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.authService.resetPassword(
+      resetPasswordDto.token, 
+      resetPasswordDto.newPassword
+    );
+  }
+
+  @Post('change-password')
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Changer son mot de passe',
+    description: `
+      Permet à un utilisateur connecté de changer son mot de passe.
+      
+      **Exigences:**
+      - L'utilisateur doit être authentifié
+      - Le mot de passe actuel doit être correct
+      - Le nouveau mot de passe doit avoir au moins 6 caractères
+    `
+  })
+  @ApiBody({ type: ChangePasswordDto })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Mot de passe changé avec succès',
+    schema: {
+      example: {
+        message: 'Mot de passe changé avec succès'
+      }
+    }
+  })
+  @ApiBadRequestResponse({
+    description: 'Mot de passe actuel incorrect',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Mot de passe actuel incorrect',
+        error: 'Bad Request'
+      }
+    }
+  })
+  async changePassword(@Body() changePasswordDto: ChangePasswordDto, @Request() req) {
+    return this.authService.changePassword(
+      req.user.id,
+      changePasswordDto.currentPassword,
+      changePasswordDto.newPassword
+    );
   }
 }

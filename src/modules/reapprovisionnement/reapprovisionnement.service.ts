@@ -351,7 +351,7 @@ export class ReapprovisionnementService {
       select: { id: true, reference: true },
     });
 
-    const produitsMap = new Map(produits.map((p) => [p.id, p.reference]));
+    const produitsMap = new Map<number, string>(produits.map((p) => [p.id, p.reference]));
 
     this.logger.log(
       `Bon de commande ${numeroCommande} créé - ${lignesCommande.length} lignes - ${montantTotal} FCFA`,

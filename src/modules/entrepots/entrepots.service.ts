@@ -10,6 +10,8 @@ import { UpdateEntrepotDto } from './dto/update-entrepot.dto';
  * - CRUD complet (Create, Read, Update, Delete)
  * - Gestion de l'inventaire par entrepôt
  * - Statistiques par entrepôt
+ * - Comparaison multi-entrepôts
+ * - Gestion des mouvements et transferts
  * 
  * @class EntrepotsService
  * @injectable
@@ -38,6 +40,12 @@ export class EntrepotsService {
    * ```
    */
   async create(createEntrepotDto: CreateEntrepotDto) {
+    // Auto-générer le code si non fourni
+    if (!createEntrepotDto.code) {
+      const count = await this.prisma.entrepot.count();
+      createEntrepotDto.code = `ENT-${String(count + 1).padStart(4, '0')}`;
+    }
+
     // Vérifier si le code et/ou le nom existent déjà
     await this.checkExisting(createEntrepotDto.code, createEntrepotDto.nom);
 
@@ -54,8 +62,26 @@ export class EntrepotsService {
       }
     }
 
+    // Construire les données pour Prisma
+    const data: any = {
+      nom: createEntrepotDto.nom,
+      code: createEntrepotDto.code,
+      adresse: createEntrepotDto.adresse,
+      ville: createEntrepotDto.ville,
+      pays: createEntrepotDto.pays,
+      capacite: createEntrepotDto.capacite,
+      estActif: createEntrepotDto.estActif ?? true,
+    };
+
+    // Ajouter le responsable si spécifié
+    if (createEntrepotDto.responsableId) {
+      data.responsable = {
+        connect: { id: createEntrepotDto.responsableId }
+      };
+    }
+
     return this.prisma.entrepot.create({
-      data: createEntrepotDto,
+      data,
       include: {
         responsable: { 
           select: { 
@@ -86,25 +112,77 @@ export class EntrepotsService {
    * const inactifs = await entrepotsService.findAll(false);
    * ```
    */
-  async findAll(estActif?: boolean) {
+  async findAll(filters?: {
+    search?: string;
+    estActif?: boolean;
+    page?: number;
+    limit?: number;
+  }) {
+    const { search, estActif, page = 1, limit = 20 } = filters || {};
+    
+    const where: any = {};
+    
+    if (search) {
+      where.OR = [
+        { nom: { contains: search, mode: 'insensitive' } },
+        { code: { contains: search, mode: 'insensitive' } },
+        { ville: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    
+    if (estActif !== undefined) {
+      where.estActif = estActif;
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.entrepot.findMany({
+        where,
+        include: {
+          responsable: { 
+            select: { 
+              id: true, 
+              nomComplet: true,
+              email: true,
+            } 
+          },
+          _count: { 
+            select: { 
+              inventaire: true,
+              transfertsSource: true,
+              transfertsDestination: true,
+              bonsCommande: true,
+            } 
+          },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { nom: 'asc' },
+      }),
+      this.prisma.entrepot.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Récupérer tous les entrepôts actifs
+   */
+  async getActifs() {
     return this.prisma.entrepot.findMany({
-      where: estActif !== undefined ? { estActif } : {},
-      include: {
-        responsable: { 
-          select: { 
-            id: true, 
-            nomComplet: true,
-            email: true,
-          } 
-        },
-        _count: { 
-          select: { 
-            inventaire: true,
-            transfertsSource: true,
-            transfertsDestination: true,
-            bonsCommande: true,
-          } 
-        },
+      where: { estActif: true },
+      select: {
+        id: true,
+        nom: true,
+        code: true,
+        ville: true,
+        adresse: true,
+        capacite: true,
       },
       orderBy: { nom: 'asc' },
     });
@@ -415,29 +493,352 @@ export class EntrepotsService {
    * });
    * ```
    */
-  async getInventaire(entrepotId: number) {
+  async getInventaire(entrepotId: number, filters?: {
+    search?: string;
+    categorieId?: number;
+    stockFaible?: boolean;
+    page?: number;
+    limit?: number;
+  }) {
     await this.findOne(entrepotId);
 
-    return this.prisma.inventaire.findMany({
-      where: { entrepotId },
-      include: {
-        produit: { 
-          include: { 
-            categorie: {
-              select: {
-                id: true,
-                nom: true,
+    const { search, categorieId, stockFaible, page = 1, limit = 50 } = filters || {};
+    
+    const where: any = { entrepotId };
+    
+    if (search) {
+      where.produit = {
+        OR: [
+          { nom: { contains: search, mode: 'insensitive' } },
+          { reference: { contains: search, mode: 'insensitive' } },
+        ],
+      };
+    }
+    
+    if (categorieId) {
+      where.produit = { ...where.produit, categorieId };
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.inventaire.findMany({
+        where,
+        include: {
+          produit: { 
+            include: { 
+              categorie: {
+                select: {
+                  id: true,
+                  nom: true,
+                },
               },
-            },
+            } 
+          },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { 
+          produit: { 
+            nom: 'asc' 
           } 
         },
-      },
-      orderBy: { 
-        produit: { 
-          nom: 'asc' 
-        } 
+      }),
+      this.prisma.inventaire.count({ where }),
+    ]);
+
+    // Filtrer par stock faible si demandé
+    let filteredData = data;
+    if (stockFaible) {
+      filteredData = data.filter(i => i.quantite <= i.produit.niveauStockMin);
+    }
+
+    return {
+      data: filteredData,
+      total: stockFaible ? filteredData.length : total,
+      page,
+      limit,
+      totalPages: Math.ceil((stockFaible ? filteredData.length : total) / limit),
+    };
+  }
+
+  /**
+   * Obtenir les produits en stock faible
+   */
+  async getStockFaible(entrepotId: number) {
+    await this.findOne(entrepotId);
+
+    const inventaire = await this.prisma.inventaire.findMany({
+      where: { entrepotId },
+      include: {
+        produit: {
+          include: {
+            categorie: { select: { id: true, nom: true } },
+          },
+        },
       },
     });
+
+    return inventaire
+      .filter(i => i.quantite <= i.produit.niveauStockMin)
+      .map(i => ({
+        id: i.id,
+        produit: i.produit,
+        quantite: i.quantite,
+        quantiteReservee: i.quantiteReservee,
+        seuilAlerte: i.produit.niveauStockMin,
+        emplacement: i.emplacement,
+        deficit: i.produit.niveauStockMin - i.quantite,
+      }));
+  }
+
+  /**
+   * Obtenir les mouvements de stock d'un entrepôt
+   */
+  async getMouvements(entrepotId: number, filters?: {
+    typeMouvement?: string;
+    dateDebut?: string;
+    dateFin?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    await this.findOne(entrepotId);
+
+    const { typeMouvement, dateDebut, dateFin, page = 1, limit = 50 } = filters || {};
+
+    const where: any = { entrepotId };
+
+    if (typeMouvement) {
+      where.typeMouvement = typeMouvement;
+    }
+
+    if (dateDebut || dateFin) {
+      where.dateMouvement = {};
+      if (dateDebut) where.dateMouvement.gte = new Date(dateDebut);
+      if (dateFin) where.dateMouvement.lte = new Date(dateFin);
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.mouvementStock.findMany({
+        where,
+        include: {
+          produit: { select: { id: true, nom: true, reference: true } },
+          utilisateur: { select: { id: true, nomComplet: true } },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { dateMouvement: 'desc' },
+      }),
+      this.prisma.mouvementStock.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Obtenir les transferts en attente pour un entrepôt
+   */
+  async getTransfertsPending(entrepotId: number) {
+    await this.findOne(entrepotId);
+
+    const [entrants, sortants] = await Promise.all([
+      this.prisma.transfertStock.findMany({
+        where: {
+          entrepotDestinationId: entrepotId,
+          statut: { in: ['EN_ATTENTE', 'EN_TRANSIT'] },
+        },
+        include: {
+          entrepotSource: { select: { id: true, nom: true } },
+          lignes: {
+            include: {
+              produit: { select: { id: true, nom: true, reference: true } },
+            },
+          },
+        },
+        orderBy: { dateCreation: 'desc' },
+      }),
+      this.prisma.transfertStock.findMany({
+        where: {
+          entrepotSourceId: entrepotId,
+          statut: { in: ['EN_ATTENTE', 'EN_TRANSIT'] },
+        },
+        include: {
+          entrepotDestination: { select: { id: true, nom: true } },
+          lignes: {
+            include: {
+              produit: { select: { id: true, nom: true, reference: true } },
+            },
+          },
+        },
+        orderBy: { dateCreation: 'desc' },
+      }),
+    ]);
+
+    return { entrants, sortants };
+  }
+
+  /**
+   * Obtenir les commandes liées à un entrepôt
+   */
+  async getCommandes(entrepotId: number, filters?: {
+    statut?: string;
+    dateDebut?: string;
+    dateFin?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    await this.findOne(entrepotId);
+
+    const { statut, dateDebut, dateFin, page = 1, limit = 20 } = filters || {};
+
+    const where: any = { entrepotId };
+
+    if (statut) {
+      where.statut = statut;
+    }
+
+    if (dateDebut || dateFin) {
+      where.dateCommande = {};
+      if (dateDebut) where.dateCommande.gte = new Date(dateDebut);
+      if (dateFin) where.dateCommande.lte = new Date(dateFin);
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.commande.findMany({
+        where,
+        include: {
+          client: { select: { id: true, nom: true } },
+          _count: { select: { lignes: true } },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { dateCommande: 'desc' },
+      }),
+      this.prisma.commande.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Obtenir la capacité et l'utilisation d'un entrepôt
+   */
+  async getCapacite(entrepotId: number) {
+    const entrepot = await this.findOne(entrepotId);
+
+    const inventaire = await this.prisma.inventaire.aggregate({
+      where: { entrepotId },
+      _sum: {
+        quantite: true,
+        quantiteReservee: true,
+      },
+      _count: true,
+    });
+
+    const totalArticles = inventaire._sum.quantite || 0;
+    const totalReserve = inventaire._sum.quantiteReservee || 0;
+    const nombreProduits = inventaire._count;
+
+    return {
+      entrepotId,
+      nom: entrepot.nom,
+      capaciteMax: entrepot.capacite || 0,
+      utilisation: {
+        totalArticles,
+        totalReserve,
+        disponible: totalArticles - totalReserve,
+        nombreProduits,
+      },
+      tauxUtilisation: entrepot.capacite 
+        ? Math.round((totalArticles / entrepot.capacite) * 100) 
+        : null,
+      espacesRestants: entrepot.capacite 
+        ? entrepot.capacite - totalArticles 
+        : null,
+    };
+  }
+
+  /**
+   * Changer le responsable d'un entrepôt
+   */
+  async changeResponsable(entrepotId: number, responsableId: number) {
+    await this.findOne(entrepotId);
+
+    const responsable = await this.prisma.utilisateur.findUnique({
+      where: { id: responsableId },
+    });
+
+    if (!responsable) {
+      throw new NotFoundException(`Utilisateur #${responsableId} non trouvé`);
+    }
+
+    return this.prisma.entrepot.update({
+      where: { id: entrepotId },
+      data: { responsableId },
+      include: {
+        responsable: {
+          select: { id: true, nomComplet: true, email: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Comparer plusieurs entrepôts
+   */
+  async comparer(entrepotIds: number[]) {
+    if (!entrepotIds || entrepotIds.length < 2) {
+      throw new BadRequestException('Au moins 2 entrepôts requis pour la comparaison');
+    }
+
+    const entrepots = await Promise.all(
+      entrepotIds.map(async (id) => {
+        const entrepot = await this.prisma.entrepot.findUnique({
+          where: { id },
+          include: {
+            responsable: { select: { nomComplet: true } },
+          },
+        });
+
+        if (!entrepot) {
+          throw new NotFoundException(`Entrepôt #${id} non trouvé`);
+        }
+
+        const stats = await this.getStatistiques(id);
+        const capacite = await this.getCapacite(id);
+
+        return {
+          id: entrepot.id,
+          nom: entrepot.nom,
+          code: entrepot.code,
+          ville: entrepot.ville,
+          responsable: entrepot.responsable?.nomComplet || 'Non assigné',
+          estActif: entrepot.estActif,
+          ...stats,
+          tauxUtilisation: capacite.tauxUtilisation,
+        };
+      })
+    );
+
+    return {
+      comparaison: entrepots,
+      resume: {
+        totalProduits: entrepots.reduce((sum, e) => sum + e.totalProduits, 0),
+        totalArticles: entrepots.reduce((sum, e) => sum + e.totalArticles, 0),
+        valeurTotale: entrepots.reduce((sum, e) => sum + e.valeurTotale, 0),
+        produitsStockFaible: entrepots.reduce((sum, e) => sum + e.produitsStockFaible, 0),
+      },
+    };
   }
 
   /**

@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsDateString, IsArray, ValidateNested, Min } from 'class-validator';
+import { IsInt, IsOptional, IsDateString, IsArray, ValidateNested, Min, IsNumber, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class DetailCommandeDto {
@@ -10,6 +10,20 @@ export class DetailCommandeDto {
   quantite: number;
 
   @IsOptional()
+  @IsNumber()
+  prixUnitaire?: number;
+}
+
+export class LigneCommandeDto {
+  @IsInt()
+  produitId: number;
+
+  @IsInt()
+  @Min(1)
+  quantite: number;
+
+  @IsOptional()
+  @IsNumber()
   prixUnitaire?: number;
 }
 
@@ -18,20 +32,39 @@ export class CreateCommandeDto {
   @IsInt()
   clientId?: number;
 
-  // NOUVEAU : Champ pour le mode Premium
   @IsOptional()
   @IsInt()
   entrepotId?: number;
 
+  @IsOptional()
   @IsDateString()
-  dateCommande: string;
+  dateCommande?: string;
 
   @IsOptional()
   @IsDateString()
   dateLivraison?: string;
 
+  @IsOptional()
+  @IsDateString()
+  dateLivraisonPrevue?: string; // Alias pour dateLivraison
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsNumber()
+  remise?: number;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => DetailCommandeDto)
-  details: DetailCommandeDto[];
+  details?: DetailCommandeDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LigneCommandeDto)
+  lignes?: LigneCommandeDto[]; // Alias pour details
 }

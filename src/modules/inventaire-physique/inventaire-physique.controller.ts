@@ -7,9 +7,12 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
+  Delete,
   Body,
   Param,
   Query,
+  Res,
   ParseIntPipe,
   UseGuards,
   Request,
@@ -450,5 +453,168 @@ export class InventairePhysiqueController {
   async getStatistiques(@Param('id', ParseIntPipe) sessionId: number) {
     const session = await this.inventairePhysiqueService.getSessionDetails(sessionId);
     return session.statistiques;
+  }
+
+  // ============================================
+  // ROUTES SUPPLÉMENTAIRES FRONTEND
+  // ============================================
+
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mettre à jour une session' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  async update(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Body() updateData: any,
+  ) {
+    return this.inventairePhysiqueService.update(sessionId, updateData);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer une session' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  async delete(@Param('id', ParseIntPipe) sessionId: number) {
+    return this.inventairePhysiqueService.remove(sessionId);
+  }
+
+  @Post(':id/demarrer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Démarrer une session d\'inventaire' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  async demarrer(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Request() req: any,
+  ) {
+    return this.inventairePhysiqueService.demarrer(sessionId, req.user.id);
+  }
+
+  @Post(':id/terminer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Terminer une session d\'inventaire' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  async terminer(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Request() req: any,
+  ) {
+    return this.inventairePhysiqueService.terminer(sessionId, req.user.id);
+  }
+
+  @Get(':id/lignes')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Lister les lignes d\'une session' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getLignes(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.inventairePhysiqueService.getLignes(sessionId, {
+      page: page ? +page : undefined,
+      limit: limit ? +limit : undefined,
+    });
+  }
+
+  @Post(':id/lignes')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Ajouter un produit à la session' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  async ajouterLigne(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Body() data: { produitId: number },
+    @Request() req: any,
+  ) {
+    return this.inventairePhysiqueService.ajouterProduit(sessionId, data.produitId, req.user.id);
+  }
+
+  @Post(':id/lignes/:ligneId/compter')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Compter une ligne' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  @ApiParam({ name: 'ligneId', description: 'ID de la ligne' })
+  async compterLigne(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Param('ligneId', ParseIntPipe) ligneId: number,
+    @Body() data: { quantiteComptee: number; notes?: string },
+    @Request() req: any,
+  ) {
+    return this.inventairePhysiqueService.compterLigne(sessionId, ligneId, data, req.user.id);
+  }
+
+  @Post(':id/lignes/:ligneId/recomptage')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Demander un recomptage' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  @ApiParam({ name: 'ligneId', description: 'ID de la ligne' })
+  async demanderRecomptage(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Param('ligneId', ParseIntPipe) ligneId: number,
+    @Request() req: any,
+  ) {
+    return this.inventairePhysiqueService.demanderRecomptage(sessionId, ligneId, req.user.id);
+  }
+
+  @Post(':id/lignes/:ligneId/recompter')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Effectuer le recomptage' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  @ApiParam({ name: 'ligneId', description: 'ID de la ligne' })
+  async recompterLigne(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Param('ligneId', ParseIntPipe) ligneId: number,
+    @Body() data: { quantiteComptee: number; notes?: string },
+    @Request() req: any,
+  ) {
+    return this.inventairePhysiqueService.recompterLigne(sessionId, ligneId, data, req.user.id);
+  }
+
+  @Get(':id/resume')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Résumé de la session' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  async getResume(@Param('id', ParseIntPipe) sessionId: number) {
+    return this.inventairePhysiqueService.getResume(sessionId);
+  }
+
+  @Get(':id/progression')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Progression de la session' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  async getProgression(@Param('id', ParseIntPipe) sessionId: number) {
+    return this.inventairePhysiqueService.getProgression(sessionId);
+  }
+
+  @Get('actives')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Sessions actives' })
+  async getActives() {
+    return this.inventairePhysiqueService.getActives();
+  }
+
+  @Get('statistiques')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Statistiques globales des inventaires physiques' })
+  @ApiQuery({ name: 'dateDebut', required: false })
+  @ApiQuery({ name: 'dateFin', required: false })
+  async getStatistiquesGlobales(
+    @Query('dateDebut') dateDebut?: string,
+    @Query('dateFin') dateFin?: string,
+  ) {
+    return this.inventairePhysiqueService.getStatistiquesGlobales({ dateDebut, dateFin });
+  }
+
+  @Get(':id/rapport')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Générer le rapport de la session' })
+  @ApiParam({ name: 'id', description: 'ID de la session' })
+  @ApiQuery({ name: 'format', enum: ['pdf', 'excel'], required: false })
+  async genererRapport(
+    @Param('id', ParseIntPipe) sessionId: number,
+    @Query('format') format: string = 'pdf',
+    @Res() res: any,
+  ) {
+    return this.inventairePhysiqueService.genererRapport(sessionId, format, res);
   }
 }

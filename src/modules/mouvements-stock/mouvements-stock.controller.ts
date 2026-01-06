@@ -1,5 +1,6 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiSecurity } from '@nestjs/swagger';
+import { Controller, Get, Query, Param, UseGuards, ParseIntPipe, Res } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiSecurity, ApiParam, ApiProduces } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { MouvementsStockService } from './mouvements-stock.service';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { PremiumGuard } from '../../common/guards/premium.guard';
@@ -438,5 +439,120 @@ export class MouvementsStockController {
   })
   getStatistiques() {
     return this.mouvementsStockService.getStatistiques();
+  }
+
+  // ==========================================
+  // ROUTES SUPPLÉMENTAIRES
+  // ==========================================
+
+  @Get('recent')
+  @PremiumFeature(Feature.MOUVEMENTS_STOCK_BASIQUE)
+  @ApiOperation({ summary: 'Mouvements récents' })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getRecent(@Query('limit') limit?: string) {
+    return this.mouvementsStockService.getRecent(limit ? +limit : 10);
+  }
+
+  @Get('par-type')
+  @PremiumFeature(Feature.MOUVEMENTS_STOCK_BASIQUE)
+  @ApiOperation({ summary: 'Mouvements regroupés par type' })
+  getParType() {
+    return this.mouvementsStockService.getParType();
+  }
+
+  @Get('export')
+  @PremiumFeature(Feature.MOUVEMENTS_STOCK_BASIQUE)
+  @ApiOperation({ summary: 'Exporter les mouvements' })
+  @ApiQuery({ name: 'format', enum: ['csv', 'excel', 'pdf'], required: false })
+  @ApiQuery({ name: 'produitId', required: false, type: Number })
+  @ApiQuery({ name: 'entrepotId', required: false, type: Number })
+  @ApiQuery({ name: 'typeMouvement', required: false })
+  @ApiQuery({ name: 'dateDebut', required: false })
+  @ApiQuery({ name: 'dateFin', required: false })
+  @ApiProduces('text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/pdf')
+  async export(
+    @Query('format') format: string = 'excel',
+    @Query('produitId') produitId?: string,
+    @Query('entrepotId') entrepotId?: string,
+    @Query('typeMouvement') typeMouvement?: string,
+    @Query('dateDebut') dateDebut?: string,
+    @Query('dateFin') dateFin?: string,
+    @Res() res?: Response,
+  ) {
+    // Simplified export - just return data for now
+    const data = await this.mouvementsStockService.findAll({
+      produitId: produitId ? +produitId : undefined,
+      entrepotId: entrepotId ? +entrepotId : undefined,
+      typeMouvement,
+      dateDebut,
+      dateFin,
+    });
+    
+    if (res) {
+      res.json(data);
+    }
+    return data;
+  }
+
+  @Get('produit/:produitId')
+  @PremiumFeature(Feature.MOUVEMENTS_STOCK_BASIQUE)
+  @ApiOperation({ summary: 'Mouvements d\'un produit' })
+  @ApiParam({ name: 'produitId', type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getByProduit(
+    @Param('produitId', ParseIntPipe) produitId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.mouvementsStockService.findAll({
+      produitId,
+      page: page ? +page : undefined,
+      limit: limit ? +limit : undefined,
+    });
+  }
+
+  @Get('entrepot/:entrepotId')
+  @PremiumFeature(Feature.MOUVEMENTS_STOCK_BASIQUE)
+  @ApiOperation({ summary: 'Mouvements d\'un entrepôt' })
+  @ApiParam({ name: 'entrepotId', type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getByEntrepot(
+    @Param('entrepotId', ParseIntPipe) entrepotId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.mouvementsStockService.findAll({
+      entrepotId,
+      page: page ? +page : undefined,
+      limit: limit ? +limit : undefined,
+    });
+  }
+
+  @Get('type/:type')
+  @PremiumFeature(Feature.MOUVEMENTS_STOCK_BASIQUE)
+  @ApiOperation({ summary: 'Mouvements par type' })
+  @ApiParam({ name: 'type', type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  getByType(
+    @Param('type') type: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.mouvementsStockService.findAll({
+      typeMouvement: type,
+      page: page ? +page : undefined,
+      limit: limit ? +limit : undefined,
+    });
+  }
+
+  @Get(':id')
+  @PremiumFeature(Feature.MOUVEMENTS_STOCK_BASIQUE)
+  @ApiOperation({ summary: 'Détails d\'un mouvement' })
+  @ApiParam({ name: 'id', type: Number })
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.mouvementsStockService.findOne(id);
   }
 }

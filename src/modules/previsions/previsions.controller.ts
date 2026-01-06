@@ -89,6 +89,39 @@ export class PrevisionsController {
   // PRÉVISIONS GLOBALES COMMANDES
   // ============================================
 
+  @Get('produits-a-commander')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN, Role.GESTIONNAIRE)
+  @ApiOperation({
+    summary: 'Liste des produits à commander',
+    description: `
+      Retourne la liste des produits nécessitant un réapprovisionnement urgent.
+      
+      **Fonctionnalité:** 🔒 PREMIUM
+      
+      **Critères:**
+      - Stock actuel ≤ stock minimum
+      - Ou point de commande atteint
+      
+      **Données retournées:**
+      - Liste des produits triés par urgence
+      - Quantité suggérée à commander
+      - Fournisseur préféré (si disponible)
+    `,
+  })
+  @ApiQuery({ name: 'limit', type: Number, required: false, example: 20 })
+  @ApiQuery({ name: 'entrepotId', type: Number, required: false })
+  @ApiResponse({ status: 200, description: 'Liste des produits à commander' })
+  async getProduitsACommander(
+    @Query('limit') limit?: string,
+    @Query('entrepotId') entrepotId?: string,
+  ) {
+    return this.previsionsService.getProduitsACommander(
+      limit ? +limit : 20,
+      entrepotId ? +entrepotId : undefined,
+    );
+  }
+
   @Get('commandes')
   @HttpCode(HttpStatus.OK)
   @Roles(Role.ADMIN, Role.GESTIONNAIRE)

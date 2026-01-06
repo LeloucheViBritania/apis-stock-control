@@ -8,8 +8,38 @@ export class ClientsService {
   constructor(private prisma: PrismaService) {}
 
   async create(createClientDto: CreateClientDto) {
+    // Mapper segment string vers enum
+    let segment: any = 'NOUVEAU';
+    if (createClientDto.segment) {
+      const segmentMap: Record<string, string> = {
+        'Particulier': 'NOUVEAU',
+        'Entreprise': 'REGULIER',
+        'VIP': 'VIP',
+        'particulier': 'NOUVEAU',
+        'entreprise': 'REGULIER',
+        'vip': 'VIP',
+      };
+      segment = segmentMap[createClientDto.segment] || 'NOUVEAU';
+    }
+
+    const data: any = {
+      nom: createClientDto.nom,
+      email: createClientDto.email || null,
+      telephone: createClientDto.telephone,
+      adresse: createClientDto.adresse,
+      ville: createClientDto.ville,
+      pays: createClientDto.pays,
+      numeroFiscal: createClientDto.numeroFiscal,
+      estActif: createClientDto.estActif ?? true,
+      segment: segment,
+      limiteCredit: createClientDto.limiteCredit || 0,
+    };
+
+    // Filtrer les valeurs undefined
+    Object.keys(data).forEach(key => data[key] === undefined && delete data[key]);
+
     return this.prisma.client.create({
-      data: createClientDto,
+      data,
     });
   }
 
@@ -18,6 +48,8 @@ export class ClientsService {
     search?: string;
     page?: number;
     limit?: number;
+    statut?: string;
+    segment?: string;
   }) {
     const page = filters?.page || 1;
     const limit = filters?.limit || 50;
@@ -27,6 +59,23 @@ export class ClientsService {
 
     if (filters?.estActif !== undefined) {
       where.estActif = filters.estActif;
+    }
+
+    // Support statut filter
+    if (filters?.statut) {
+      where.statut = filters.statut;
+    }
+
+    // Support segment filter
+    if (filters?.segment) {
+      // Map frontend segment values to backend enum values
+      const segmentMap: Record<string, string> = {
+        'PARTICULIER': 'NOUVEAU',
+        'PROFESSIONNEL': 'REGULIER',
+        'ENTREPRISE': 'FIDELE',
+        'VIP': 'VIP',
+      };
+      where.segment = segmentMap[filters.segment] || filters.segment;
     }
 
     if (filters?.search) {
@@ -98,9 +147,27 @@ export class ClientsService {
   async update(id: number, updateClientDto: UpdateClientDto) {
     await this.findOne(id);
 
+    // Mapper segment string vers enum si présent
+    const data: any = { ...updateClientDto };
+    if (updateClientDto.segment) {
+      const segmentMap: Record<string, string> = {
+        'Particulier': 'NOUVEAU',
+        'Entreprise': 'REGULIER',
+        'VIP': 'VIP',
+        'particulier': 'NOUVEAU',
+        'entreprise': 'REGULIER',
+        'vip': 'VIP',
+      };
+      data.segment = segmentMap[updateClientDto.segment] || updateClientDto.segment;
+    }
+
+    // Supprimer les champs non-Prisma
+    delete data.entreprise;
+    delete data.notes;
+
     return this.prisma.client.update({
       where: { id },
-      data: updateClientDto,
+      data,
     });
   }
 

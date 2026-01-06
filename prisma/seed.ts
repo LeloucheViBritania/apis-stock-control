@@ -1,3 +1,9 @@
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+
+// Explicitly point to the .env file in the parent directory
+dotenv.config({ path: path.join(__dirname, '../.env') });
+
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 

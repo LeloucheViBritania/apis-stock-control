@@ -11,4 +11,8 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsInt()
   categorieParenteId?: number;
+
+  @IsOptional()
+  @IsInt()
+  parentId?: number; // Alias pour compatibilité frontend
 }
